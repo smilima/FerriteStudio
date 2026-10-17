@@ -173,13 +173,13 @@ fn run_stage(app: &mut App, stage: usize, elapsed: Duration, dir: &std::path::Pa
             let caret = at + "    form.set_".len();
             app.replace_text(i, text, caret);
             app.caret_offset = caret;
-            app.request_completion();
+            app.request_completion(true);
             Next::Advance
         }
         5 => {
             if !ui.get_completion_open() {
                 if elapsed > Duration::from_secs(20) && elapsed.as_secs() % 5 == 0 {
-                    app.request_completion();
+                    app.request_completion(true);
                 }
                 return Next::Wait;
             }

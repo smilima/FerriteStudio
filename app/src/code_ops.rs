@@ -120,9 +120,13 @@ impl App {
             // serverStatus says whether the server is idle; $/progress
             // reports work in between and ends with an empty message.
             LspEvent::Status(s) if s.starts_with("rust-analyzer") => {
+                let was_ready = self.lsp_ready;
                 self.lsp_ready = s == "rust-analyzer: ready";
                 self.lsp_base = s.clone();
                 self.ui().set_lsp_status(s.into());
+                if self.lsp_ready && !was_ready {
+                    self.retry_pending_completion();
+                }
             }
             LspEvent::Status(s) if s.is_empty() => self.ui().set_lsp_status(self.lsp_base.as_str().into()),
             LspEvent::Status(s) => self.ui().set_lsp_status(format!("rust-analyzer: {s}").into()),
@@ -161,18 +165,24 @@ impl App {
                 self.caret_offset = at + s.len();
                 let text = &self.buffers[i].text;
                 let triggers = s == "." || (s == ":" && text[..at].ends_with(':'));
+                let word = s.chars().all(|c| c.is_alphanumeric() || c == '_');
                 if triggers {
-                    self.request_completion();
-                } else if self.ui().get_completion_open() {
-                    if s.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                    self.request_completion(false);
+                } else if self.ui().get_completion_open() || self.pending_completion.is_some() {
+                    if word {
                         self.filter_completions();
+                        // The server cut the list short: ask again with
+                        // the longer prefix.
+                        if self.completion_incomplete || self.pending_completion.is_some() {
+                            self.request_completion(false);
+                        }
                     } else {
                         self.close_popups();
                     }
                 }
             }
             None => {
-                if self.ui().get_completion_open() {
+                if self.ui().get_completion_open() || self.pending_completion.is_some() {
                     self.close_popups();
                 }
             }
@@ -203,25 +213,84 @@ impl App {
         let ui = self.ui();
         ui.set_completion_open(false);
         self.shown_completions.clear();
+        self.pending_completion = None;
         if !self.hover.is_empty() {
             self.hover.clear();
             ui.set_hover_text("".into());
         }
     }
 
-    pub fn request_completion(&mut self) {
+    /// Asks rust-analyzer for completions at the caret. `explicit` is
+    /// Ctrl+Space, which reports when there is nothing to offer; `.` and
+    /// `::` open the list quietly.
+    pub fn request_completion(&mut self, explicit: bool) {
         let Some((_, path)) = self.current_rust() else { return };
         let Some(lsp) = self.lsp.clone() else {
             self.status("Code completion needs rust-analyzer, which is not running");
             return;
         };
         let offset = self.caret_offset;
-        let _ = lsp.completion(&path, offset, move |items| {
-            post(move |a| {
-                a.completions = items;
-                a.filter_completions();
-            })
-        });
+        if !self.lsp_ready {
+            // Until the project is loaded (build scripts run, macros
+            // expanded) the answer would lack the form's methods; show what
+            // there is now and ask again when rust-analyzer is ready.
+            self.pending_completion = Some((path.clone(), offset));
+            self.status("rust-analyzer is still loading the project; completion will open when it is ready");
+        }
+        let target = path.clone();
+        let _ = lsp.completion(&target, offset, move |r| post(move |a| a.completion_arrived(&path, offset, explicit, r)));
+    }
+
+    /// Whether the caret is still where a completion was asked for, or
+    /// further along the same word.
+    fn caret_still_at(&self, path: &Path, offset: usize) -> bool {
+        let Some(i) = self.current.filter(|_| self.view == View::Code) else { return false };
+        let text = &self.buffers[i].text;
+        path_key(&self.buffers[i].path) == path_key(path)
+            && self.caret_offset >= offset
+            && text.get(offset..self.caret_offset).is_some_and(|s| s.chars().all(|c| c.is_alphanumeric() || c == '_'))
+    }
+
+    fn completion_arrived(
+        &mut self,
+        path: &Path,
+        offset: usize,
+        explicit: bool,
+        result: Result<ferrite_lsp::CompletionList, String>,
+    ) {
+        if !self.caret_still_at(path, offset) {
+            return;
+        }
+        let list = match result {
+            Ok(list) => list,
+            Err(e) => {
+                self.status(&format!("Code completion failed: {e}"));
+                return;
+            }
+        };
+        if self.lsp_ready {
+            self.pending_completion = None;
+        }
+        self.completion_incomplete = list.incomplete;
+        if list.items.is_empty() {
+            self.completions.clear();
+            self.ui().set_completion_open(false);
+            if explicit && self.lsp_ready {
+                self.status("No completions at the caret");
+            }
+            return;
+        }
+        self.completions = list.items;
+        self.filter_completions();
+    }
+
+    /// rust-analyzer became ready: answer a completion asked for while it
+    /// was loading, if the caret has not moved away.
+    pub fn retry_pending_completion(&mut self) {
+        let Some((path, offset)) = self.pending_completion.take() else { return };
+        if self.caret_still_at(&path, offset) {
+            self.request_completion(false);
+        }
     }
 
     fn filter_completions(&mut self) {

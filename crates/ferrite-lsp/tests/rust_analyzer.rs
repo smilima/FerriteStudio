@@ -65,7 +65,7 @@ fn diagnostics_completion_hover_definition_and_format() {
     for _ in 0..20 {
         let ctx = ctx.clone();
         client.completion(&path, offset, move |items| ctx.send(items).unwrap()).unwrap();
-        let items = crx.recv_timeout(Duration::from_secs(30)).unwrap();
+        let items = crx.recv_timeout(Duration::from_secs(30)).unwrap().map(|l| l.items).unwrap_or_default();
         labels = items.iter().map(|c| c.label.clone()).collect::<Vec<_>>();
         if let Some(c) = items.iter().find(|c| c.label.starts_with("greet")) {
             let applied = apply_edits(&edited, &[ferrite_lsp::Edit { start: c.start, end: c.end, text: c.text.clone() }]);

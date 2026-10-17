@@ -115,3 +115,10 @@ export struct Mark {
     len: int,
     level: string,
 }
+
+// One colour of the code editor's syntax highlighting: the whole document
+// with every character of another colour replaced by a space.
+export struct SyntaxLayer {
+    kind: string,
+    text: string,
+}

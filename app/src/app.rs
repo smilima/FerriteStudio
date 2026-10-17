@@ -122,6 +122,11 @@ pub struct App {
     pub watches: Vec<(String, String)>,
     pub completions: Vec<Completion>,
     pub shown_completions: Vec<usize>,
+    /// The server left completions out; ask again while typing.
+    pub completion_incomplete: bool,
+    /// Completion asked for (file, offset) before rust-analyzer had
+    /// loaded the project; asked again once it is ready.
+    pub pending_completion: Option<(PathBuf, usize)>,
     pub caret_line: usize,
     pub caret_offset: usize,
     pub hover: String,
@@ -190,6 +195,8 @@ pub fn install(ui: &AppWindow) {
         watches: Vec::new(),
         completions: Vec::new(),
         shown_completions: Vec::new(),
+        completion_incomplete: false,
+        pending_completion: None,
         caret_line: 0,
         caret_offset: 0,
         hover: String::new(),
@@ -245,7 +252,7 @@ fn wire_callbacks(ui: &AppWindow) {
 
     ui.on_editor_edited(|t| act(move |a| a.editor_edited(t.to_string())));
     ui.on_caret_moved(|line, _col, offset| act(move |a| a.caret_moved(line, offset)));
-    ui.on_request_completion(|| act(|a| a.request_completion()));
+    ui.on_request_completion(|| act(|a| a.request_completion(true)));
     ui.on_completion_chosen(|i| act(move |a| a.completion_chosen(i as usize)));
     ui.on_completion_cancel(|| act(|a| a.close_popups()));
     ui.on_hover_at_caret(|| act(|a| a.hover_at_caret()));
@@ -706,6 +713,7 @@ impl App {
             ui.set_line_count(1);
             ui.set_breakpoints(ModelRc::default());
             ui.set_marks(ModelRc::default());
+            ui.set_syntax(ModelRc::default());
             ui.set_exec_line(-1);
             return;
         };
@@ -713,6 +721,7 @@ impl App {
             ui.set_editor_text(b.text.as_str().into());
             ui.set_editor_read_only(b.read_only);
         }
+        ui.set_syntax(ModelRc::new(VecModel::from(crate::views::syntax_layers(&b.path, &b.text))));
         let lines = b.text.matches('\n').count() + 1;
         if reset_text || ui.get_line_count() as usize != lines {
             ui.set_line_count(lines as i32);

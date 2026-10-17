@@ -4,7 +4,16 @@ use ferrite_form::model::{published_name, Form};
 use ferrite_form::{kind_spec, Control, PropType};
 use slint::{Color, ModelRc, SharedString, VecModel};
 
-use crate::{ControlItem, EventRow, PropRow};
+use crate::{ControlItem, EventRow, PropRow, SyntaxLayer};
+
+/// The code editor's colour layers for a file.
+pub fn syntax_layers(path: &std::path::Path, text: &str) -> Vec<SyntaxLayer> {
+    use crate::highlight::{layers, Language};
+    layers(text, Language::for_path(path))
+        .into_iter()
+        .map(|(kind, text)| SyntaxLayer { kind: kind.name().into(), text: text.into() })
+        .collect()
+}
 
 pub fn parse_color(s: &str) -> Option<Color> {
     let hex = s.strip_prefix('#')?;

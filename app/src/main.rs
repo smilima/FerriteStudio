@@ -13,6 +13,7 @@ mod build_ops;
 mod code_ops;
 mod debug_ops;
 mod form_ops;
+mod highlight;
 mod selftest;
 mod views;
 

@@ -59,6 +59,14 @@ pub struct Completion {
     pub text: String,
 }
 
+/// The server's answer to a completion request.
+#[derive(Clone, Debug, Default)]
+pub struct CompletionList {
+    pub items: Vec<Completion>,
+    /// The server left items out; ask again as the user keeps typing.
+    pub incomplete: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Location {
     pub path: PathBuf,
@@ -372,13 +380,15 @@ impl LspClient {
         self.notify("textDocument/didSave", json!({ "textDocument": { "uri": path_to_uri(path) } }))
     }
 
+    /// Asks for completions at `offset`. The callback gets the server's
+    /// error message if the request failed.
     pub fn completion(
         &self,
         path: &Path,
         offset: usize,
-        cb: impl FnOnce(Vec<Completion>) + Send + 'static,
+        cb: impl FnOnce(Result<CompletionList, String>) + Send + 'static,
     ) -> io::Result<()> {
-        let Some(text) = self.snapshot(path) else { return Ok(cb(Vec::new())) };
+        let Some(text) = self.snapshot(path) else { return Ok(cb(Err("the file is not open".into()))) };
         let enc = self.encoding;
         // Default replacement range: the identifier left of the caret.
         let ident_start = text[..offset.min(text.len())]
@@ -389,13 +399,16 @@ impl LspClient {
             .map_or(offset, |(i, _)| i);
         let params = json!({ "textDocument": { "uri": path_to_uri(path) }, "position": self.pos(&text, offset) });
         self.request("textDocument/completion", params, move |r| {
-            let Ok(v) = r else { return cb(Vec::new()) };
-            let items = match serde_json::from_value::<Option<CompletionResponse>>(v) {
-                Ok(Some(CompletionResponse::Array(items))) => items,
-                Ok(Some(CompletionResponse::List(list))) => list.items,
-                _ => Vec::new(),
+            let v = match r {
+                Ok(v) => v,
+                Err(e) => return cb(Err(e)),
             };
-            let mut items: Vec<_> = items.into_iter().collect();
+            let (mut items, incomplete) = match serde_json::from_value::<Option<CompletionResponse>>(v) {
+                Ok(Some(CompletionResponse::Array(items))) => (items, false),
+                Ok(Some(CompletionResponse::List(list))) => (list.items, list.is_incomplete),
+                Ok(None) => (Vec::new(), false),
+                Err(e) => return cb(Err(format!("unreadable completion reply: {e}"))),
+            };
             items.sort_by(|a, b| {
                 a.sort_text.as_deref().unwrap_or(&a.label).cmp(b.sort_text.as_deref().unwrap_or(&b.label))
             });
@@ -427,7 +440,7 @@ impl LspClient {
                     }
                 })
                 .collect();
-            cb(out)
+            cb(Ok(CompletionList { items: out, incomplete }))
         })
     }
 

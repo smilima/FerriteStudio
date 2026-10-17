@@ -5,7 +5,7 @@
 import { Button, LineEdit, ListView, Palette, ScrollView } from "std-widgets.slint";
 import {
     CompletionRow, ControlItem, EventRow, FileItem, Mark, MessageRow, PaletteItem, ProblemRow, PropRow,
-    StackRow, TabItem, VarRow, WatchRow,
+    StackRow, SyntaxLayer, TabItem, VarRow, WatchRow,
 } from "types.slint";
 import { Designer } from "designer.slint";
 import { Inspector } from "inspector.slint";
@@ -14,7 +14,7 @@ import { BottomPanes } from "panes.slint";
 
 export {
     CompletionRow, ControlItem, EventRow, FileItem, Mark, MessageRow, PaletteItem, ProblemRow, PropRow,
-    StackRow, TabItem, VarRow, WatchRow,
+    StackRow, SyntaxLayer, TabItem, VarRow, WatchRow,
 }
 
 component ToolButton inherits Rectangle {
@@ -97,6 +97,7 @@ export component AppWindow inherits Window {
     in property <[int]> breakpoints;
     in property <int> exec-line: -1;
     in property <[Mark]> marks;
+    in property <[SyntaxLayer]> syntax;
     in property <bool> editor-read-only;
     in property <[CompletionRow]> completions;
     in property <bool> completion-open;
@@ -381,6 +382,7 @@ export component AppWindow inherits Window {
                             breakpoints: root.breakpoints;
                             exec-line: root.exec-line;
                             marks: root.marks;
+                            syntax: root.syntax;
                             read-only: root.editor-read-only;
                             completions: root.completions;
                             completion-open: root.completion-open;

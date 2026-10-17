@@ -31,8 +31,8 @@ the IDE through the whole session on its own.
 | Form Designer | Click a palette entry then the form to drop; drag to move; corner handle to resize; 8 px grid; Delete; Ctrl+arrows nudge |
 | Object Inspector | Properties typed per control (text, numbers, booleans, colours, lists); Events tab |
 | Event handlers | Double-click a control (or an event) to create `fn <control>_<event>(form: &MainForm, …)` and jump to it; empty handlers are pruned on save, like C++Builder |
-| Code editor | Monospace editor with line numbers, auto-indent, error squiggles, breakpoints in the gutter |
-| rust-analyzer | Live diagnostics, completion (Ctrl+Space, `.`, `::`), Help Insight (Ctrl+Shift+H), Find Declaration (Alt+Up), Format (Ctrl+D) |
+| Code editor | Monospace editor with syntax colouring (Rust, Slint, TOML), line numbers, auto-indent, error squiggles, breakpoints in the gutter |
+| rust-analyzer | Live diagnostics, completion (Ctrl+Space, `.`, `::`; asked again once rust-analyzer has loaded the project), Help Insight (Ctrl+Shift+H), Find Declaration (Alt+Up), Format (Ctrl+D) |
 | Build | Ctrl+F9 runs `cargo build`; errors land in Problems and jump to the source |
 | Run / Debug | F9 builds and debugs; Shift+Ctrl+F9 runs without the debugger; Ctrl+F2 resets |
 | Debugger | Breakpoints (F5), Step Over (F8), Trace Into (F7), Run Until Return (Shift+F8), Call Stack, Local Variables (double-click to expand), Watches (Ctrl+F5) |

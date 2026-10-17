@@ -2,9 +2,15 @@
 // gutter for line numbers and breakpoints, error squiggles, the execution
 // line, and popups for completion and hover. Column positions come from the
 // font's character width, which is why the font must be monospaced.
+//
+// Syntax colouring: the TextInput's own text is transparent and draws only
+// the selection; under it one Text per colour (see SyntaxLayer) shows the
+// characters of that colour, the rest blanked out, so the layers line up
+// with the input character for character. The caret is drawn here too,
+// because TextInput paints its caret in the (transparent) text colour.
 
 import { Palette } from "std-widgets.slint";
-import { CompletionRow, Mark } from "types.slint";
+import { CompletionRow, Mark, SyntaxLayer } from "types.slint";
 
 export component CodeEditor inherits Rectangle {
     in property <string> font-family;
@@ -15,6 +21,7 @@ export component CodeEditor inherits Rectangle {
     in property <[int]> breakpoints;
     in property <int> exec-line: -1;
     in property <[Mark]> marks;
+    in property <[SyntaxLayer]> syntax;
     in property <bool> read-only;
     in property <[CompletionRow]> completions;
     in property <bool> completion-open;
@@ -37,6 +44,25 @@ export component CodeEditor inherits Rectangle {
     property <length> pad: 4px;
     property <int> first-completion: max(0, min(self.completion-index - 4, self.completions.length - 10));
     property <color> exec-color: #ffe9a6;
+    property <length> caret-x;
+    property <length> caret-y;
+    property <bool> caret-on: true;
+    property <bool> coloured: root.syntax.length > 0;
+    property <bool> dark: Palette.color-scheme == ColorScheme.dark;
+
+    // RAD Studio's classic scheme on light backgrounds; a VS Code-like one
+    // on dark.
+    pure function syntax-color(kind: string) -> color {
+        if kind == "keyword" { return root.dark ? #569cd6 : #000080; }
+        if kind == "type" { return root.dark ? #4ec9b0 : #2b7a99; }
+        if kind == "string" { return root.dark ? #ce9178 : #0000ff; }
+        if kind == "number" { return root.dark ? #b5cea8 : #098658; }
+        if kind == "comment" { return root.dark ? #6a9955 : #008000; }
+        if kind == "macro" { return root.dark ? #dcdcaa : #8b008b; }
+        if kind == "attribute" { return root.dark ? #c586c0 : #008080; }
+        if kind == "lifetime" { return root.dark ? #d7ba7d : #a0522d; }
+        return Palette.foreground;
+    }
 
     background: Palette.background;
 
@@ -56,6 +82,14 @@ export component CodeEditor inherits Rectangle {
 
     public function focus-editor() {
         ti.focus();
+    }
+
+    Timer {
+        interval: 530ms;
+        running: ti.has-focus;
+        triggered => {
+            root.caret-on = !root.caret-on;
+        }
     }
 
     probe := Text {
@@ -147,6 +181,22 @@ export component CodeEditor inherits Rectangle {
             background: m.level == "error" ? #e53935 : #e0a000;
         }
 
+        for layer in root.syntax: Text {
+            x: ti.x;
+            y: ti.y;
+            width: ti.width;
+            height: ti.height;
+            text: layer.text;
+            font-family: root.font-family;
+            font-size: root.font-size;
+            font-weight: layer.kind == "keyword" ? 700 : 400;
+            font-italic: layer.kind == "comment";
+            color: root.syntax-color(layer.kind);
+            wrap: no-wrap;
+            vertical-alignment: top;
+            horizontal-alignment: left;
+        }
+
         ti := TextInput {
             x: root.gutter-w + 6px;
             y: root.pad;
@@ -156,9 +206,10 @@ export component CodeEditor inherits Rectangle {
             wrap: no-wrap;
             font-family: root.font-family;
             font-size: root.font-size;
-            color: Palette.foreground;
+            color: root.coloured ? transparent : Palette.foreground;
             selection-background-color: #3b82f660;
-            selection-foreground-color: Palette.foreground;
+            selection-foreground-color: root.coloured ? transparent : Palette.foreground;
+            text-cursor-width: 0px;
             read-only: root.read-only;
             text <=> root.text;
 
@@ -167,6 +218,9 @@ export component CodeEditor inherits Rectangle {
             }
 
             cursor-position-changed(p) => {
+                root.caret-x = p.x;
+                root.caret-y = p.y;
+                root.caret-on = true;
                 root.caret-line = round(p.y / root.line-h);
                 root.caret-col = round(p.x / root.char-w);
                 root.caret-moved(root.caret-line, root.caret-col, self.cursor-position-byte-offset);
@@ -209,6 +263,14 @@ export component CodeEditor inherits Rectangle {
                 }
                 reject
             }
+        }
+
+        if ti.has-focus && root.caret-on: Rectangle {
+            x: ti.x + root.caret-x;
+            y: ti.y + root.caret-y;
+            width: 2px;
+            height: root.line-h;
+            background: Palette.foreground;
         }
 
         // Completion list under the caret.
