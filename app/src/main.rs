@@ -12,6 +12,7 @@ mod app;
 mod build_ops;
 mod code_ops;
 mod debug_ops;
+mod debug_tip;
 mod form_ops;
 mod highlight;
 mod selftest;

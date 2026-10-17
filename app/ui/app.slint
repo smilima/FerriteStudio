@@ -103,6 +103,10 @@ export component AppWindow inherits Window {
     in property <bool> completion-open;
     in-out property <int> completion-index;
     in property <string> hover-text;
+    in property <[VarRow]> tip-rows;
+    in property <int> tip-line: -1;
+    in property <int> tip-col;
+    in property <int> tip-width;
 
     in property <[MessageRow]> messages;
     in property <[ProblemRow]> problems;
@@ -158,6 +162,9 @@ export component AppWindow inherits Window {
     callback editor-edited(string);
     callback caret-moved(int, int, int);
     callback request-completion();
+    callback mouse-cell(int, int);
+    callback tip-expand(int);
+    callback tip-hover(bool);
     callback completion-chosen(int);
     callback completion-cancel();
     callback hover-at-caret();
@@ -214,7 +221,7 @@ export component AppWindow inherits Window {
 
     function editor-key(e: KeyEvent) -> bool {
         if root.handle-key(e) { return true; }
-        if e.text == Key.Escape && root.hover-text != "" { root.editor-special-key("escape"); return true; }
+        if e.text == Key.Escape && (root.hover-text != "" || root.tip-line >= 0) { root.editor-special-key("escape"); return true; }
         if root.editor-read-only { return false; }
         if e.text == Key.Tab && !e.modifiers.shift && !e.modifiers.control { root.editor-special-key("tab"); return true; }
         if e.text == Key.Return && !e.modifiers.control && !e.modifiers.alt { root.editor-special-key("return"); return true; }
@@ -388,6 +395,13 @@ export component AppWindow inherits Window {
                             completion-open: root.completion-open;
                             completion-index <=> root.completion-index;
                             hover-text: root.hover-text;
+                            tip-rows: root.tip-rows;
+                            tip-line: root.tip-line;
+                            tip-col: root.tip-col;
+                            tip-width: root.tip-width;
+                            mouse-cell(l, c) => { root.mouse-cell(l, c); }
+                            tip-expand(i) => { root.tip-expand(i); }
+                            tip-hover(h) => { root.tip-hover(h); }
                             edited(t) => { root.editor-edited(t); }
                             caret-moved(l, c, o) => { root.caret-moved(l, c, o); }
                             key(e) => { root.editor-key(e) }

@@ -35,7 +35,7 @@ the IDE through the whole session on its own.
 | rust-analyzer | Live diagnostics, completion (Ctrl+Space, `.`, `::`; asked again once rust-analyzer has loaded the project), Help Insight (Ctrl+Shift+H), Find Declaration (Alt+Up), Format (Ctrl+D) |
 | Build | Ctrl+F9 runs `cargo build`; errors land in Problems and jump to the source |
 | Run / Debug | F9 builds and debugs; Shift+Ctrl+F9 runs without the debugger; Ctrl+F2 resets |
-| Debugger | Breakpoints (F5), Step Over (F8), Trace Into (F7), Run Until Return (Shift+F8), Call Stack, Local Variables (double-click to expand), Watches (Ctrl+F5) |
+| Debugger | Breakpoints (F5), Step Over (F8), Trace Into (F7), Run Until Return (Shift+F8), Call Stack, Local Variables (double-click to expand), Watches (Ctrl+F5), tooltips over variables while paused (struct fields one level open, click to open more) |
 
 ## Requirements
 

@@ -10,7 +10,7 @@
 // because TextInput paints its caret in the (transparent) text colour.
 
 import { Palette } from "std-widgets.slint";
-import { CompletionRow, Mark, SyntaxLayer } from "types.slint";
+import { CompletionRow, Mark, SyntaxLayer, VarRow } from "types.slint";
 
 export component CodeEditor inherits Rectangle {
     in property <string> font-family;
@@ -27,6 +27,12 @@ export component CodeEditor inherits Rectangle {
     in property <bool> completion-open;
     in-out property <int> completion-index;
     in property <string> hover-text;
+    // Debugger tooltip: rows to show (empty: none), the line and column it
+    // hangs under, and its width in characters.
+    in property <[VarRow]> tip-rows;
+    in property <int> tip-line: -1;
+    in property <int> tip-col;
+    in property <int> tip-width;
 
     out property <int> caret-line;
     out property <int> caret-col;
@@ -42,6 +48,10 @@ export component CodeEditor inherits Rectangle {
     callback toggle-breakpoint(int);
     callback completion-chosen(int);
     callback completion-cancel();
+    // The character cell under the mouse changed (-1, -1: the mouse left).
+    callback mouse-cell(int, int);
+    callback tip-expand(int);
+    callback tip-hover(bool);
 
     property <length> gutter-w: max(48px, self.char-w * 5 + 28px);
     property <length> pad: 4px;
@@ -52,6 +62,7 @@ export component CodeEditor inherits Rectangle {
     property <bool> caret-on: true;
     property <bool> coloured: root.syntax.length > 0;
     property <bool> dark: Palette.color-scheme == ColorScheme.dark;
+    property <length> tip-row-h: root.line-h + 4px;
 
     // RAD Studio's classic scheme on light backgrounds; a VS Code-like one
     // on dark.
@@ -188,8 +199,8 @@ export component CodeEditor inherits Rectangle {
         }
 
         for layer in root.syntax: Text {
-            x: ti.x;
-            y: ti.y;
+            x: text-area.x;
+            y: text-area.y;
             width: ti.width;
             height: ti.height;
             text: layer.text;
@@ -203,77 +214,94 @@ export component CodeEditor inherits Rectangle {
             horizontal-alignment: left;
         }
 
-        ti := TextInput {
+        // Follows the mouse over the text for debugger tooltips. As the
+        // TextInput's parent it sees every move but leaves clicks, drags
+        // and selection to the TextInput.
+        text-area := TouchArea {
             x: root.gutter-w + 6px;
             y: root.pad;
-            width: max(flick.width - root.gutter-w - 6px, self.preferred-width + 24px);
-            height: max(flick.height - root.pad, self.preferred-height + 24px);
-            single-line: false;
-            wrap: no-wrap;
-            font-family: root.font-family;
-            font-size: root.font-size;
-            color: root.coloured ? transparent : Palette.foreground;
-            selection-background-color: #3b82f660;
-            selection-foreground-color: root.coloured ? transparent : Palette.foreground;
-            text-cursor-width: 0px;
-            read-only: root.read-only;
-            text <=> root.text;
-
-            edited => {
-                root.edited(self.text);
+            width: ti.width;
+            height: ti.height;
+            mouse-cursor: MouseCursor.text;
+            property <int> cell-line: self.has-hover ? floor(self.mouse-y / root.line-h) : -1;
+            property <int> cell-col: self.has-hover ? floor(self.mouse-x / root.char-w) : -1;
+            changed cell-line => {
+                root.mouse-cell(self.cell-line, self.cell-col);
+            }
+            changed cell-col => {
+                root.mouse-cell(self.cell-line, self.cell-col);
             }
 
-            cursor-position-changed(p) => {
-                root.caret-x = p.x;
-                root.caret-y = p.y;
-                root.caret-on = true;
-                root.caret-line = round(p.y / root.line-h);
-                root.caret-col = round(p.x / root.char-w);
-                root.caret-moved(root.caret-line, root.caret-col, self.cursor-position-byte-offset);
-                // Keep the caret visible.
-                if p.y + root.line-h + 2 * root.pad > -flick.content-y + flick.height {
-                    flick.content-y = -(p.y + root.line-h + 2 * root.pad - flick.height);
-                }
-                if p.y < -flick.content-y {
-                    flick.content-y = -p.y;
-                }
-                if self.x + p.x + 24px > -flick.content-x + flick.width {
-                    flick.content-x = -(self.x + p.x + 24px - flick.width);
-                }
-                if self.x + p.x < -flick.content-x + root.gutter-w + 6px {
-                    flick.content-x = min(0px, -(p.x - 24px));
-                }
-            }
+            ti := TextInput {
+                width: max(flick.width - root.gutter-w - 6px, self.preferred-width + 24px);
+                height: max(flick.height - root.pad, self.preferred-height + 24px);
+                single-line: false;
+                wrap: no-wrap;
+                font-family: root.font-family;
+                font-size: root.font-size;
+                color: root.coloured ? transparent : Palette.foreground;
+                selection-background-color: #3b82f660;
+                selection-foreground-color: root.coloured ? transparent : Palette.foreground;
+                text-cursor-width: 0px;
+                read-only: root.read-only;
+                text <=> root.text;
 
-            key-pressed(e) => {
-                if root.completion-open {
-                    if e.text == Key.UpArrow {
-                        root.completion-index = max(0, root.completion-index - 1);
-                        return accept;
+                edited => {
+                    root.edited(self.text);
+                }
+
+                cursor-position-changed(p) => {
+                    root.caret-x = p.x;
+                    root.caret-y = p.y;
+                    root.caret-on = true;
+                    root.caret-line = round(p.y / root.line-h);
+                    root.caret-col = round(p.x / root.char-w);
+                    root.caret-moved(root.caret-line, root.caret-col, self.cursor-position-byte-offset);
+                    // Keep the caret visible.
+                    if p.y + root.line-h + 2 * root.pad > -flick.content-y + flick.height {
+                        flick.content-y = -(p.y + root.line-h + 2 * root.pad - flick.height);
                     }
-                    if e.text == Key.DownArrow {
-                        root.completion-index = min(root.completions.length - 1, root.completion-index + 1);
-                        return accept;
+                    if p.y < -flick.content-y {
+                        flick.content-y = -p.y;
                     }
-                    if e.text == Key.Return || e.text == Key.Tab {
-                        root.completion-chosen(root.completion-index);
-                        return accept;
+                    if text-area.x + p.x + 24px > -flick.content-x + flick.width {
+                        flick.content-x = -(text-area.x + p.x + 24px - flick.width);
                     }
-                    if e.text == Key.Escape {
-                        root.completion-cancel();
-                        return accept;
+                    if text-area.x + p.x < -flick.content-x + root.gutter-w + 6px {
+                        flick.content-x = min(0px, -(p.x - 24px));
                     }
                 }
-                if root.key(e) {
-                    return accept;
+
+                key-pressed(e) => {
+                    if root.completion-open {
+                        if e.text == Key.UpArrow {
+                            root.completion-index = max(0, root.completion-index - 1);
+                            return accept;
+                        }
+                        if e.text == Key.DownArrow {
+                            root.completion-index = min(root.completions.length - 1, root.completion-index + 1);
+                            return accept;
+                        }
+                        if e.text == Key.Return || e.text == Key.Tab {
+                            root.completion-chosen(root.completion-index);
+                            return accept;
+                        }
+                        if e.text == Key.Escape {
+                            root.completion-cancel();
+                            return accept;
+                        }
+                    }
+                    if root.key(e) {
+                        return accept;
+                    }
+                    reject
                 }
-                reject
             }
         }
 
         if ti.has-focus && root.caret-on: Rectangle {
-            x: ti.x + root.caret-x;
-            y: ti.y + root.caret-y;
+            x: text-area.x + root.caret-x;
+            y: text-area.y + root.caret-y;
             width: 2px;
             height: root.line-h;
             background: Palette.foreground;
@@ -281,7 +309,7 @@ export component CodeEditor inherits Rectangle {
 
         // Completion list under the caret.
         if root.completion-open: Rectangle {
-            x: ti.x + root.caret-col * root.char-w;
+            x: text-area.x + root.caret-col * root.char-w;
             y: (root.caret-line + 1) * root.line-h + root.pad + 2px;
             width: 420px;
             height: min(10, root.completions.length) * 22px + 4px;
@@ -326,7 +354,7 @@ export component CodeEditor inherits Rectangle {
 
         // Help Insight popup.
         if root.hover-text != "": Rectangle {
-            x: ti.x + root.caret-col * root.char-w;
+            x: text-area.x + root.caret-col * root.char-w;
             y: (root.caret-line + 1) * root.line-h + root.pad + 2px;
             width: min(560px, hover.preferred-width + 20px);
             height: hover.preferred-height + 16px;
@@ -343,6 +371,92 @@ export component CodeEditor inherits Rectangle {
                 wrap: word-wrap;
                 font-family: root.font-family;
                 color: #1f2328;
+            }
+        }
+        // Debugger tooltip: the value under the mouse while paused, with a
+        // struct's fields below it; click a row to open or close it.
+        if root.tip-line >= 0 && root.tip-rows.length > 0: Rectangle {
+            property <length> below: text-area.y + (root.tip-line + 1) * root.line-h + 1px;
+            width: min(100, max(12, root.tip-width)) * root.char-w + 20px;
+            height: min(16, root.tip-rows.length) * root.tip-row-h + 8px;
+            x: max(-flick.content-x + root.gutter-w, min(text-area.x + root.tip-col * root.char-w, -flick.content-x + flick.width - self.width - 8px));
+            y: self.below + self.height > -flick.content-y + flick.height ? text-area.y + root.tip-line * root.line-h - self.height - 1px : self.below;
+            background: root.dark ? #2d2f33 : #ffffe1;
+            border-width: 1px;
+            border-color: root.dark ? #5a5d63 : #a8a37c;
+            border-radius: 3px;
+            drop-shadow-blur: 8px;
+            drop-shadow-color: #00000050;
+
+            TouchArea {
+                changed has-hover => {
+                    root.tip-hover(self.has-hover);
+                }
+
+                Flickable {
+                    x: 4px;
+                    y: 4px;
+                    width: parent.width - 8px;
+                    height: parent.height - 8px;
+                    content-height: root.tip-rows.length * root.tip-row-h;
+
+                    for row[i] in root.tip-rows: TouchArea {
+                        y: i * root.tip-row-h;
+                        height: root.tip-row-h;
+                        mouse-cursor: row.expandable || row.expanded ? MouseCursor.pointer : MouseCursor.default;
+                        clicked => {
+                            root.tip-expand(i);
+                        }
+
+                        Rectangle {
+                            background: parent.has-hover && (row.expandable || row.expanded) ? Palette.selection-background.with-alpha(0.18) : transparent;
+                        }
+
+                        HorizontalLayout {
+                            padding-left: 4px + row.depth * 2 * root.char-w;
+                            padding-right: 4px;
+                            Text {
+                                width: 2 * root.char-w;
+                                text: row.expandable ? "+" : row.expanded ? "−" : "";
+                                font-family: root.font-family;
+                                font-size: root.font-size;
+                                vertical-alignment: center;
+                                color: Palette.foreground.with-alpha(0.7);
+                            }
+                            // When space runs short the type gives way
+                            // first, then the value; the name never does.
+                            Text {
+                                text: row.name;
+                                min-width: self.preferred-width;
+                                font-family: root.font-family;
+                                font-size: root.font-size;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                                color: root.dark ? #9cdcfe : #000080;
+                            }
+                            Text {
+                                text: " = " + row.value;
+                                min-width: min(self.preferred-width, 40 * root.char-w);
+                                font-family: root.font-family;
+                                font-size: root.font-size;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                horizontal-stretch: 0;
+                                color: Palette.foreground;
+                            }
+                            Text {
+                                text: row.type-name == "" ? "" : "  : " + row.type-name;
+                                min-width: 0;
+                                font-family: root.font-family;
+                                font-size: root.font-size;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                                color: Palette.foreground.with-alpha(0.55);
+                            }
+                        }
+                    }
+                }
             }
         }
     }

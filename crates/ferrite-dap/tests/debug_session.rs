@@ -35,7 +35,7 @@ fn breakpoint_stack_locals_and_exit() {
     let src = dir.join("hello.rs");
     std::fs::write(
         &src,
-        "fn add(a: i32, b: i32) -> i32 {\n    let sum = a + b;\n    sum\n}\n\nfn main() {\n    let x = add(2, 3);\n    println!(\"x = {x}\");\n}\n",
+        "fn add(a: i32, b: i32) -> i32 {\n    let sum = a + b;\n    sum\n}\n\nstruct Point {\n    x: i32,\n    y: i32,\n}\n\nfn main() {\n    let p = Point { x: 2, y: 3 };\n    let x = add(p.x, p.y);\n    println!(\"x = {x}\");\n}\n",
     )
     .unwrap();
     let exe = dir.join(if cfg!(windows) { "hello.exe" } else { "hello" });
@@ -111,6 +111,24 @@ fn breakpoint_stack_locals_and_exit() {
     let (etx, erx) = mpsc::channel();
     client.evaluate("a + b", Some(frames[0].id), "watch", move |r| etx.send(r).unwrap()).unwrap();
     assert_eq!(erx.recv_timeout(T).unwrap().unwrap(), "5");
+
+    // What a tooltip does: evaluate a struct in the caller's frame, then
+    // list its fields.
+    let main_frame = frames.iter().find(|f| f.name.contains("main")).expect("main on the stack");
+    let (htx, hrx) = mpsc::channel();
+    client.evaluate_value("p", Some(main_frame.id), "hover", move |r| htx.send(r).unwrap()).unwrap();
+    let p = hrx.recv_timeout(T).unwrap().expect("p evaluates");
+    eprintln!("hover p: {p:?}");
+    assert!(p.reference != 0, "a struct has children: {p:?}");
+    assert!(p.type_name.contains("Point") || p.value.contains("Point"), "{p:?}");
+    let (ftx, frx) = mpsc::channel();
+    client.variables(p.reference, move |v| ftx.send(v).unwrap()).unwrap();
+    let fields: Vec<String> = frx.recv_timeout(T).unwrap().iter().map(|v| format!("{}={}", v.name, v.value)).collect();
+    assert_eq!(fields, ["x=2", "y=3"]);
+    let (xtx, xrx) = mpsc::channel();
+    client.evaluate_value("p.y", Some(main_frame.id), "hover", move |r| xtx.send(r).unwrap()).unwrap();
+    let y = xrx.recv_timeout(T).unwrap().expect("p.y evaluates");
+    assert_eq!((y.value.as_str(), y.reference), ("3", 0));
 
     client.resume(thread).unwrap();
     wait_for(&rx, |e| matches!(e, DapEvent::Exited { .. } | DapEvent::Terminated), &mut output);

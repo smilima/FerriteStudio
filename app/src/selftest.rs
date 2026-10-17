@@ -91,7 +91,7 @@ fn tick(app: &mut App) {
     }
 }
 
-const LAST_STAGE: usize = 10;
+const LAST_STAGE: usize = 11;
 
 fn run_stage(app: &mut App, stage: usize, elapsed: Duration, dir: &std::path::Path) -> Next {
     let ui = app.ui();
@@ -254,7 +254,40 @@ fn run_stage(app: &mut App, stage: usize, elapsed: Duration, dir: &std::path::Pa
                 Err(e) => Next::Fail(e),
             }
         }
+        // Debugger tooltip: rest the mouse on `form` in the paused line.
         10 => {
+            let i = app.current.unwrap();
+            let line = ui.get_exec_line().max(0) as usize;
+            let text = app.buffers[i].text.lines().nth(line).unwrap_or("").to_string();
+            let Some(col) = text.find("form") else {
+                return Next::Fail(format!("no `form` on line {}: {text:?}", line + 1));
+            };
+            let cell = (line, text[..col].chars().count() + 1);
+            if app.hover_cell != Some(cell) {
+                app.mouse_cell(cell.0 as i32, cell.1 as i32);
+                return Next::Wait;
+            }
+            let rows: Vec<crate::VarRow> = ui.get_tip_rows().iter().collect();
+            if rows.len() < 2 || rows[0].value.is_empty() {
+                if elapsed > Duration::from_secs(30) {
+                    return Next::Fail(format!("no tooltip with fields for `form`: {rows:?}"));
+                }
+                return Next::Wait;
+            }
+            if rows[0].name != "form" || !rows[0].expanded || rows[1].depth != 1 {
+                return Next::Fail(format!("unexpected tooltip: {rows:?}"));
+            }
+            SCRIPT.with(|s| {
+                let r = &rows[0];
+                s.borrow_mut().as_mut().unwrap().log.push(format!("tooltip {} = {} : {} ({} rows)", r.name, r.value, r.type_name, rows.len()))
+            });
+            match screenshot(app, dir, "5-tooltip") {
+                Ok(()) => Next::Advance,
+                Err(e) => Next::Fail(e),
+            }
+        }
+        11 => {
+            app.hide_tip();
             app.program_reset();
             app.open_path(&app.project.as_ref().unwrap().path("ui/main_form.slint"));
             let slint = std::fs::read_to_string(app.project.as_ref().unwrap().path("ui/main_form.slint")).unwrap();

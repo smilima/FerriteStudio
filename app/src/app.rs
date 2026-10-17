@@ -130,6 +130,13 @@ pub struct App {
     pub caret_line: usize,
     pub caret_offset: usize,
     pub hover: String,
+    /// Debugger tooltip shown, the editor cell under the mouse, a counter
+    /// that changes when the mouse moves, and whether the mouse is on the
+    /// tooltip.
+    pub tip: Option<crate::debug_tip::DebugTip>,
+    pub hover_cell: Option<(usize, usize)>,
+    pub hover_gen: u64,
+    pub tip_hovered: bool,
 }
 
 pub fn mono_font() -> &'static str {
@@ -200,6 +207,10 @@ pub fn install(ui: &AppWindow) {
         caret_line: 0,
         caret_offset: 0,
         hover: String::new(),
+        tip: None,
+        hover_cell: None,
+        hover_gen: 0,
+        tip_hovered: false,
     };
     ui.set_messages(ModelRc::from(app.messages.clone()));
     ui.set_mono_font(mono_font().into());
@@ -253,6 +264,9 @@ fn wire_callbacks(ui: &AppWindow) {
     ui.on_editor_edited(|t| act(move |a| a.editor_edited(t.to_string())));
     ui.on_caret_moved(|line, _col, offset| act(move |a| a.caret_moved(line, offset)));
     ui.on_request_completion(|| act(|a| a.request_completion(true)));
+    ui.on_mouse_cell(|line, col| act(move |a| a.mouse_cell(line, col)));
+    ui.on_tip_expand(|i| act(move |a| a.tip_expand(i as usize)));
+    ui.on_tip_hover(|inside| act(move |a| a.tip_hover(inside)));
     ui.on_completion_chosen(|i| act(move |a| a.completion_chosen(i as usize)));
     ui.on_completion_cancel(|| act(|a| a.close_popups()));
     ui.on_hover_at_caret(|| act(|a| a.hover_at_caret()));
@@ -720,6 +734,9 @@ impl App {
         if reset_text {
             ui.set_editor_text(b.text.as_str().into());
             ui.set_editor_read_only(b.read_only);
+        }
+        if self.tip_is_stale() {
+            ui.set_tip_line(-1);
         }
         ui.set_syntax(ModelRc::new(VecModel::from(crate::views::syntax_layers(&b.path, &b.text))));
         let lines = b.text.matches('\n').count() + 1;

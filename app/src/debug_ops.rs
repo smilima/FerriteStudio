@@ -44,7 +44,7 @@ pub struct DebugSession {
 }
 
 impl DebugSession {
-    fn frame_id(&self) -> Option<i64> {
+    pub fn frame_id(&self) -> Option<i64> {
         self.frames.get(self.frame).map(|f| f.id)
     }
 }
@@ -223,6 +223,8 @@ impl App {
         }
         d.frame = i;
         d.vars.clear();
+        self.hide_tip();
+        let Some(d) = self.debug.as_mut() else { return };
         let frame = d.frames[i].clone();
         let client = d.client.clone();
         let id = d.id;
@@ -295,6 +297,7 @@ impl App {
     }
 
     fn mark_running(&mut self) {
+        self.hide_tip();
         let Some(d) = self.debug.as_mut() else { return };
         d.stopped = false;
         d.frames.clear();
@@ -336,6 +339,7 @@ impl App {
 
     fn end_session(&mut self) {
         SESSION.fetch_add(1, Ordering::SeqCst);
+        self.hide_tip();
         self.debug = None;
         self.ui().set_debug_state("".into());
         self.status("Ready");
@@ -387,6 +391,7 @@ impl App {
                     type_name: v.var.type_name.as_str().into(),
                     depth: v.depth as i32,
                     expandable: v.var.reference != 0 && !v.expanded,
+                    expanded: v.expanded,
                 })
                 .collect(),
             None => Vec::new(),

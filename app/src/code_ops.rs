@@ -146,6 +146,7 @@ impl App {
 
     pub fn editor_edited(&mut self, text: String) {
         let Some(i) = self.current else { return };
+        self.hide_tip();
         let was_dirty = self.buffers[i].dirty();
         let old = std::mem::replace(&mut self.buffers[i].text, text);
         let typed = inserted(&old, &self.buffers[i].text).map(|(at, s)| (at, s.to_string()));
@@ -214,6 +215,7 @@ impl App {
         ui.set_completion_open(false);
         self.shown_completions.clear();
         self.pending_completion = None;
+        self.hide_tip();
         if !self.hover.is_empty() {
             self.hover.clear();
             ui.set_hover_text("".into());

@@ -550,12 +550,31 @@ impl DapClient {
         context: &str,
         cb: impl FnOnce(Result<String, String>) + Send + 'static,
     ) -> io::Result<()> {
+        self.evaluate_value(expression, frame, context, move |r| cb(r.map(|v| v.value)))
+    }
+
+    /// Like [`evaluate`](Self::evaluate), with the value's type and the
+    /// reference for its children (struct fields, elements), as a
+    /// [`Variable`] named after the expression.
+    pub fn evaluate_value(
+        &self,
+        expression: &str,
+        frame: Option<i64>,
+        context: &str,
+        cb: impl FnOnce(Result<Variable, String>) + Send + 'static,
+    ) -> io::Result<()> {
         let mut args = json!({ "expression": expression, "context": context });
         if let Some(f) = frame {
             args["frameId"] = json!(f);
         }
+        let name = expression.to_string();
         self.request("evaluate", args, move |r| {
-            cb(r.map(|b| b.get("result").and_then(Value::as_str).unwrap_or("").to_string()))
+            cb(r.map(|b| Variable {
+                name,
+                value: b.get("result").and_then(Value::as_str).unwrap_or("").to_string(),
+                type_name: b.get("type").and_then(Value::as_str).unwrap_or("").to_string(),
+                reference: b.get("variablesReference").and_then(Value::as_i64).unwrap_or(0),
+            }))
         })
     }
 

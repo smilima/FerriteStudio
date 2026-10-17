@@ -140,7 +140,7 @@ export component BottomPanes inherits Rectangle {
                         spacing: 8px;
                         Text {
                             width: 14px;
-                            text: v.expandable ? "+" : "";
+                            text: v.expandable ? "+" : v.expanded ? "−" : "";
                             vertical-alignment: center;
                         }
                         Text {

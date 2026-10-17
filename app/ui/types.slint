@@ -95,7 +95,9 @@ export struct VarRow {
     value: string,
     type-name: string,
     depth: int,
+    // Has children not shown yet ("+"); `expanded` rows show "−".
     expandable: bool,
+    expanded: bool,
 }
 
 export struct WatchRow {
