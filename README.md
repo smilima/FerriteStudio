@@ -1,6 +1,6 @@
 # Ferrite Studio
 
-A RAD IDE for Rust in the spirit of Embarcadero RAD Studio / C++Builder:
+A RAD IDE for Rust:
 drop controls on a form, set their properties in the Object Inspector,
 double-click to write an event handler, press F9 to build and debug.
 
@@ -32,7 +32,7 @@ the IDE through the whole session on its own.
 | Tool Palette | Button, Label (Text), LineEdit, TextEdit, CheckBox, Switch, ComboBox, SpinBox, Slider, ProgressIndicator, Panel (Rectangle) |
 | Form Designer | Click a palette entry then the form to drop; drag to move; corner handle to resize; 8 px grid; Delete; Ctrl+arrows nudge |
 | Object Inspector | Properties typed per control (text, numbers, booleans, colours, lists); Events tab |
-| Event handlers | Double-click a control (or an event) to create `fn <control>_<event>(form: &MainForm, …)` and jump to it; empty handlers are pruned on save, like C++Builder |
+| Event handlers | Double-click a control (or an event) to create `fn <control>_<event>(form: &MainForm, …)` and jump to it; empty handlers are pruned on save |
 | Code editor | Monospace editor with syntax colouring (Rust, Slint, TOML), line numbers, auto-indent, error squiggles, breakpoints in the gutter |
 | rust-analyzer | Live diagnostics, completion (Ctrl+Space, `.`, `::`; asked again once rust-analyzer has loaded the project), Help Insight (Ctrl+Shift+H), Find Declaration (Alt+Up), Format (Ctrl+D) |
 | Build | Ctrl+F9 runs `cargo build`; errors land in Problems and jump to the source |
@@ -71,7 +71,7 @@ my_app/
 ```
 
 Each control's main value is published on the form, so handlers read and
-write controls the way C++Builder code uses `Edit1->Text`:
+write controls through the form's getters and setters:
 
 ```rust
 pub fn button1_clicked(form: &MainForm) {
