@@ -95,23 +95,26 @@ export component CodeEditor inherits Rectangle {
         }
     }
 
-    probe := Text {
-        text: "MMMMMMMMMM";
-        font-family: root.font-family;
-        font-size: root.font-size;
-        visible: false;
-    }
-
-    probe2 := Text {
-        text: "M\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM";
-        font-family: root.font-family;
-        font-size: root.font-size;
-        visible: false;
-    }
-
     flick := Flickable {
         content-width: max(self.width, root.gutter-w + ti.preferred-width + 48px);
         content-height: max(self.height, (root.line-count + 2) * root.line-h + 2 * root.pad);
+
+        // Font measurements. Inside the Flickable because a child of the
+        // editor itself would make the 101-line probe's height the
+        // editor's minimum height.
+        probe := Text {
+            text: "MMMMMMMMMM";
+            font-family: root.font-family;
+            font-size: root.font-size;
+            visible: false;
+        }
+
+        probe2 := Text {
+            text: "M\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM";
+            font-family: root.font-family;
+            font-size: root.font-size;
+            visible: false;
+        }
 
         // Current line.
         Rectangle {
