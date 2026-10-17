@@ -38,8 +38,9 @@ fn diagnostics_completion_hover_definition_and_format() {
     .expect("rust-analyzer starts");
     client.did_open(&path, main).unwrap();
 
-    // Wait for the type mismatch on `let n: i32 = "x";`.
-    let deadline = Instant::now() + Duration::from_secs(120);
+    // Wait for the type mismatch on `let n: i32 = "x";`. The first run on a
+    // machine indexes the standard library from cold, which can take minutes.
+    let deadline = Instant::now() + Duration::from_secs(600);
     let mut found = false;
     while Instant::now() < deadline && !found {
         match rx.recv_timeout(Duration::from_secs(5)) {
