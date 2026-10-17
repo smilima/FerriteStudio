@@ -18,6 +18,8 @@ the finished program uses.
 | ![Designer](docs/screenshots/1-designer.png) | ![Completion](docs/screenshots/2-completion.png) |
 | **Stopped at a breakpoint** | **After Step Over (F8)** |
 | ![Debugger](docs/screenshots/3-debugger.png) | ![Step over](docs/screenshots/4-step-over.png) |
+| **Tooltip over a variable while paused** | |
+| ![Tooltip](docs/screenshots/5-tooltip.png) | |
 
 These screenshots are produced by `ferrite-studio --selftest`, which drives
 the IDE through the whole session on its own.
