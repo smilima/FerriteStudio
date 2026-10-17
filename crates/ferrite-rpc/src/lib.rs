@@ -60,6 +60,24 @@ pub fn no_console(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
+/// MSYS2 installations on this machine (`MSYS2_ROOT`, `C:\msys64`,
+/// `C:\tools\msys64`). Always empty off Windows.
+pub fn msys2_roots() -> Vec<std::path::PathBuf> {
+    use std::path::PathBuf;
+    if !cfg!(windows) {
+        return Vec::new();
+    }
+    let mut roots = Vec::new();
+    if let Some(r) = std::env::var_os("MSYS2_ROOT") {
+        roots.push(PathBuf::from(r));
+    }
+    roots.push(PathBuf::from(r"C:\msys64"));
+    roots.push(PathBuf::from(r"C:\tools\msys64"));
+    roots.retain(|r| r.is_dir());
+    roots.dedup();
+    roots
+}
+
 /// A running server process that speaks framed JSON.
 pub struct Endpoint {
     stdin: Mutex<ChildStdin>,

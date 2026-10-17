@@ -27,21 +27,26 @@ impl App {
     /// Build options for a debug session: GDB reads DWARF only, so on the
     /// Windows MSVC toolchain the program is built for the GNU target.
     fn debug_build_options(&mut self, cfg: &AdapterConfig) -> Result<BuildOptions, String> {
-        let mut options = BuildOptions::default();
         if !cfg.needs_dwarf() {
-            return Ok(options);
+            return Ok(BuildOptions::default());
         }
         let host = ferrite_dap::rust_host().unwrap_or_default();
-        if let Some(target) = cargo::gnu_target_for(&host) {
-            if !cargo::target_installed(&target) {
-                return Err(format!(
-                    "GDB cannot read the debug info (PDB) of the {host} toolchain. \
-                     Install the GNU target once with: rustup target add {target}"
-                ));
-            }
-            self.message(format!("Building for {target} so GDB can read the debug info"), "info");
-            options.target = Some(target);
+        let Some(target) = cargo::gnu_target_for(&host) else { return Ok(BuildOptions::default()) };
+        if !cargo::target_installed(&target) {
+            return Err(format!(
+                "GDB cannot read the debug info (PDB) of the {host} toolchain. \
+                 Install the GNU target once with: rustup target add {target}"
+            ));
         }
+        if cargo::mingw_linker_missing(&target) {
+            return Err(format!(
+                "Building for {target} needs a MinGW-w64 GCC to link. Install MSYS2's \
+                 mingw-w64-x86_64-gcc (pacman -S mingw-w64-x86_64-gcc) or put x86_64-w64-mingw32-gcc on PATH."
+            ));
+        }
+        let options = cargo::gnu_target_options(&target);
+        let linker = options.env.first().map(|(_, gcc)| format!(", linking with {gcc}")).unwrap_or_default();
+        self.message(format!("Building for {target} so GDB can read the debug info{linker}"), "info");
         Ok(options)
     }
 

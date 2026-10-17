@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
-use ferrite_rpc::{no_console, Endpoint};
+use ferrite_rpc::{msys2_roots, no_console, Endpoint};
 use serde_json::{json, Value};
 
 #[derive(Clone, Debug)]
@@ -145,20 +145,6 @@ pub fn gdb_problem(gdb: &Path, path_prepend: &[PathBuf]) -> Option<String> {
     }
 }
 
-/// MSYS2 installations to search on Windows.
-fn msys2_roots() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    if let Some(r) = std::env::var_os("MSYS2_ROOT") {
-        roots.push(PathBuf::from(r));
-    }
-    for r in [r"C:\msys64", r"C:\tools\msys64"] {
-        roots.push(PathBuf::from(r));
-    }
-    roots.retain(|r| r.is_dir());
-    roots.dedup();
-    roots
-}
-
 const MSYS2_ENVS: &[&str] = &["ucrt64", "mingw64", "clang64"];
 
 /// Version numbers in a folder name such as `gdb-18.1`, for sorting.
@@ -173,7 +159,7 @@ fn gdb_candidates() -> Vec<(PathBuf, Vec<Vec<PathBuf>>)> {
     if let Some(p) = find_on_path("gdb") {
         out.push((p, vec![vec![]]));
     }
-    if cfg!(windows) {
+    {
         for root in msys2_roots() {
             let env_bins: Vec<PathBuf> =
                 MSYS2_ENVS.iter().map(|e| root.join(e).join("bin")).filter(|b| b.is_dir()).collect();

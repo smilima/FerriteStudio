@@ -135,6 +135,63 @@ pub struct BuildOptions {
     pub target: Option<String>,
     /// Folders put in front of PATH (a C compiler for the target, say).
     pub path_prepend: Vec<PathBuf>,
+    /// Extra environment variables for cargo.
+    pub env: Vec<(String, String)>,
+}
+
+/// Cargo's linker variable for a target: `CARGO_TARGET_<TRIPLE>_LINKER`.
+pub fn linker_env_var(target: &str) -> String {
+    format!("CARGO_TARGET_{}_LINKER", target.to_ascii_uppercase().replace(['-', '.'], "_"))
+}
+
+fn on_path(exe: &str) -> bool {
+    std::env::var_os("PATH")
+        .is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(exe).is_file()))
+}
+
+/// A MinGW-w64 GCC to link a Windows GNU target from an MSVC toolchain,
+/// with the folder it runs from. `None` when one is already on PATH or
+/// none is installed; see [`mingw_linker_missing`].
+pub fn mingw_linker(target: &str) -> Option<(PathBuf, PathBuf)> {
+    let (gcc, envs): (&str, &[&str]) = match target {
+        "x86_64-pc-windows-gnu" => ("x86_64-w64-mingw32-gcc.exe", &["mingw64", "ucrt64"]),
+        "i686-pc-windows-gnu" => ("i686-w64-mingw32-gcc.exe", &["mingw32"]),
+        _ => return None,
+    };
+    if on_path(gcc) {
+        return None;
+    }
+    // MINGW64 first: it uses msvcrt, the C runtime Rust's GNU target is built for.
+    for root in ferrite_rpc::msys2_roots() {
+        for env in envs {
+            let bin = root.join(env).join("bin");
+            if bin.join(gcc).is_file() {
+                return Some((bin.join(gcc), bin));
+            }
+        }
+    }
+    None
+}
+
+/// True when no MinGW-w64 linker for `target` can be found at all.
+pub fn mingw_linker_missing(target: &str) -> bool {
+    let gcc = match target {
+        "x86_64-pc-windows-gnu" => "x86_64-w64-mingw32-gcc.exe",
+        "i686-pc-windows-gnu" => "i686-w64-mingw32-gcc.exe",
+        _ => return false,
+    };
+    !on_path(gcc) && mingw_linker(target).is_none()
+}
+
+/// Build options for a Windows GNU target, with a MinGW linker if one is
+/// needed and installed.
+pub fn gnu_target_options(target: &str) -> BuildOptions {
+    let mut o = BuildOptions { target: Some(target.to_string()), ..Default::default() };
+    if let Some((gcc, bin)) = mingw_linker(target) {
+        o.env.push((linker_env_var(target), gcc.to_string_lossy().into_owned()));
+        o.path_prepend.push(bin);
+    }
+    o
 }
 
 /// `cargo build` in `root`. Events arrive on worker threads; the last one
@@ -148,6 +205,9 @@ pub fn build(
     cmd.args(["build", "--message-format=json", "--color", "never"]);
     if let Some(t) = &options.target {
         cmd.args(["--target", t]);
+    }
+    for (k, v) in &options.env {
+        cmd.env(k, v);
     }
     if !options.path_prepend.is_empty() {
         let current = std::env::var_os("PATH").unwrap_or_default();
@@ -240,6 +300,13 @@ mod tests {
         assert_eq!(gnu_target_for("x86_64-pc-windows-msvc").as_deref(), Some("x86_64-pc-windows-gnu"));
         assert_eq!(gnu_target_for("aarch64-pc-windows-msvc").as_deref(), Some("aarch64-pc-windows-gnu"));
         assert_eq!(gnu_target_for("x86_64-unknown-linux-gnu"), None);
+    }
+
+    #[test]
+    fn linker_variables_follow_cargo_naming() {
+        assert_eq!(linker_env_var("x86_64-pc-windows-gnu"), "CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER");
+        let o = gnu_target_options("x86_64-pc-windows-gnu");
+        assert_eq!(o.target.as_deref(), Some("x86_64-pc-windows-gnu"));
     }
 
     #[test]

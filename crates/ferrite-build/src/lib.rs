@@ -9,4 +9,5 @@ pub mod cargo;
 pub mod project;
 
 pub use cargo::{BuildOptions, CargoEvent, Job, Problem};
+pub use ferrite_rpc::msys2_roots;
 pub use project::{FormEntry, FormOutputs, Manifest, Project};

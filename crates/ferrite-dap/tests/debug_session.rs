@@ -41,17 +41,20 @@ fn breakpoint_stack_locals_and_exit() {
     let exe = dir.join(if cfg!(windows) { "hello.exe" } else { "hello" });
     let mut rustc = Command::new("rustc");
     rustc.args(["-g", "-o"]).arg(&exe).arg(&src);
-    // GDB reads DWARF only: on the Windows MSVC toolchain build for the GNU target.
+    // GDB reads DWARF only: on the Windows MSVC toolchain build for the GNU
+    // target, linking with MinGW as the IDE does.
     let host = ferrite_dap::rust_host().unwrap_or_default();
-    if config.needs_dwarf() && host.ends_with("-pc-windows-msvc") {
-        let target = host.replace("-pc-windows-msvc", "-pc-windows-gnu");
-        let sysroot = Command::new("rustc").args(["--print", "sysroot"]).output().unwrap();
-        let sysroot = PathBuf::from(String::from_utf8_lossy(&sysroot.stdout).trim());
-        if !sysroot.join("lib").join("rustlib").join(&target).join("lib").is_dir() {
-            eprintln!("GDB found but {target} is not installed; skipping");
+    if let (true, Some(target)) = (config.needs_dwarf(), ferrite_build::cargo::gnu_target_for(&host)) {
+        if !ferrite_build::cargo::target_installed(&target) || ferrite_build::cargo::mingw_linker_missing(&target) {
+            eprintln!("GDB found but {target} or its MinGW linker is not installed; skipping");
             return;
         }
+        let options = ferrite_build::cargo::gnu_target_options(&target);
         rustc.args(["--target", &target]);
+        if let Some((_, gcc)) = options.env.first() {
+            rustc.arg(format!("-Clinker={gcc}"));
+        }
+        rustc.env("PATH", ferrite_dap::path_with(&options.path_prepend));
     }
     eprintln!("debugging with {} {:?} (PATH additions {:?})", config.program.display(), config.args, config.path_prepend);
     let status = rustc.status().unwrap();

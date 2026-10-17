@@ -9,3 +9,6 @@ publish.workspace = true
 [dependencies]
 ferrite-rpc = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+ferrite-build = { workspace = true }
