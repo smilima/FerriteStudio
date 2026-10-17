@@ -31,7 +31,10 @@ export component CodeEditor inherits Rectangle {
     out property <int> caret-line;
     out property <int> caret-col;
     out property <length> char-w: probe.preferred-width / 10;
-    out property <length> line-h: max(1px, probe2.preferred-height - probe.preferred-height);
+    // Measured over 100 lines: the renderer snaps lines to whole device
+    // pixels, so a one-line difference can be off by a fraction of a pixel
+    // that adds up to several lines in a long file.
+    out property <length> line-h: max(1px, (probe2.preferred-height - probe.preferred-height) / 100);
 
     callback edited(string);
     callback caret-moved(int, int, int);
@@ -100,7 +103,7 @@ export component CodeEditor inherits Rectangle {
     }
 
     probe2 := Text {
-        text: "M\nM";
+        text: "M\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM\nM";
         font-family: root.font-family;
         font-size: root.font-size;
         visible: false;
