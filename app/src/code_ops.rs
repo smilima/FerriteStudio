@@ -1,40 +1,12 @@
 //! Code editor actions and the rust-analyzer connection.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use ferrite_lsp::{apply_edits, path_key, Edit, Location, LspClient, LspEvent};
 use slint::{ModelRc, VecModel};
 
 use crate::app::{post, App, View};
 use crate::CompletionRow;
-
-/// rust-analyzer from PATH or ~/.cargo/bin, if it actually runs (the rustup
-/// proxy exists even when the component is not installed).
-pub fn find_rust_analyzer() -> Option<PathBuf> {
-    let exe = if cfg!(windows) { "rust-analyzer.exe" } else { "rust-analyzer" };
-    let mut candidates: Vec<PathBuf> = std::env::var_os("PATH")
-        .map(|p| std::env::split_paths(&p).map(|d| d.join(exe)).collect())
-        .unwrap_or_default();
-    if let Some(home) = dirs::home_dir() {
-        candidates.push(home.join(".cargo").join("bin").join(exe));
-    }
-    candidates.into_iter().filter(|p| p.is_file()).find(|p| {
-        let mut cmd = Command::new(p);
-        cmd.arg("--version");
-        ferrite_rpc_no_console(&mut cmd);
-        cmd.output().map(|o| o.status.success()).unwrap_or(false)
-    })
-}
-
-fn ferrite_rpc_no_console(cmd: &mut Command) {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
-    }
-    let _ = cmd;
-}
 
 /// Byte range of the identifier around `offset`.
 pub fn ident_range(text: &str, offset: usize) -> (usize, usize) {
@@ -85,11 +57,19 @@ pub fn newline_with_indent(text: &str, offset: usize) -> (String, usize) {
 impl App {
     pub fn start_lsp(&mut self) {
         let Some(root) = self.root().map(Path::to_path_buf) else { return };
-        let Some(server) = find_rust_analyzer() else {
+        let Some(server) = ferrite_lsp::find_server() else {
             self.ui().set_lsp_status("rust-analyzer not found".into());
-            self.message("rust-analyzer was not found. Install it with: rustup component add rust-analyzer", "warning");
+            self.message(
+                "rust-analyzer was not found. Install it with: rustup component add rust-analyzer rust-src \
+                 (or set FERRITE_RUST_ANALYZER to a rust-analyzer executable)",
+                "warning",
+            );
             return;
         };
+        let cargo_bin = dirs::home_dir().map(|h| h.join(".cargo").join("bin"));
+        if !cargo_bin.is_some_and(|b| server.starts_with(b)) {
+            self.message(format!("rust-analyzer: using {}", server.display()), "info");
+        }
         self.lsp_generation += 1;
         let gen = self.lsp_generation;
         self.ui().set_lsp_status("rust-analyzer: starting".into());

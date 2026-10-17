@@ -2,15 +2,13 @@
 //! go-to-definition and formatting. Skipped when it is not installed.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use ferrite_lsp::{apply_edits, LspClient, LspEvent, Severity};
 
 fn rust_analyzer() -> Option<PathBuf> {
-    let ok = Command::new("rust-analyzer").arg("--version").output().ok()?.status.success();
-    ok.then(|| PathBuf::from("rust-analyzer"))
+    ferrite_lsp::find_server()
 }
 
 fn write(root: &Path, rel: &str, text: &str) {

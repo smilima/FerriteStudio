@@ -86,6 +86,56 @@ pub struct LspClient {
     encoding: Encoding,
 }
 
+fn runs(server: &Path) -> bool {
+    let mut cmd = Command::new(server);
+    cmd.arg("--version");
+    ferrite_rpc::no_console(&mut cmd);
+    cmd.output().map(|o| o.status.success()).unwrap_or(false)
+}
+
+/// Version numbers in a name such as `rust-lang.rust-analyzer-0.3.3081-win32-x64`.
+fn version_key(name: &str) -> Vec<u32> {
+    name.split(|c: char| !c.is_ascii_digit()).filter_map(|p| p.parse().ok()).collect()
+}
+
+/// Every place a rust-analyzer may live, best first: `FERRITE_RUST_ANALYZER`,
+/// PATH, `~/.cargo/bin` (the rustup proxy works only once the component is
+/// installed), then servers bundled with the VS Code family's rust-analyzer
+/// extension, newest first.
+pub fn server_candidates() -> Vec<PathBuf> {
+    let exe = if cfg!(windows) { "rust-analyzer.exe" } else { "rust-analyzer" };
+    let mut out = Vec::new();
+    if let Some(p) = std::env::var_os("FERRITE_RUST_ANALYZER") {
+        out.push(PathBuf::from(p));
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        out.extend(std::env::split_paths(&path).map(|d| d.join(exe)));
+    }
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from);
+    if let Some(home) = home {
+        out.push(home.join(".cargo").join("bin").join(exe));
+        let mut bundled: Vec<PathBuf> = [".vscode", ".vscode-insiders", ".vscode-oss", ".cursor"]
+            .iter()
+            .flat_map(|editor| std::fs::read_dir(home.join(editor).join("extensions")).into_iter().flatten().flatten())
+            .map(|e| e.path())
+            .filter(|d| d.file_name().is_some_and(|n| n.to_string_lossy().starts_with("rust-lang.rust-analyzer-")))
+            .map(|d| d.join("server").join(exe))
+            .collect();
+        bundled.sort_by_key(|p| {
+            let dir = p.parent().and_then(Path::parent).and_then(Path::file_name);
+            std::cmp::Reverse(dir.map(|n| version_key(&n.to_string_lossy())).unwrap_or_default())
+        });
+        out.extend(bundled);
+    }
+    out.dedup();
+    out
+}
+
+/// The first rust-analyzer that actually runs.
+pub fn find_server() -> Option<PathBuf> {
+    server_candidates().into_iter().filter(|p| p.is_file()).find(|p| runs(p))
+}
+
 /// `C:\a b\c.rs` -> `file:///C:/a%20b/c.rs`, `/a/b.rs` -> `file:///a/b.rs`.
 pub fn path_to_uri(path: &Path) -> String {
     let mut s = path.to_string_lossy().replace('\\', "/");
@@ -576,6 +626,12 @@ mod tests {
         assert!(uri.contains("My%20Docs"));
         assert_eq!(uri_to_path(&uri).unwrap(), p);
         assert_eq!(uri_to_path("file:///c%3A/x/y.rs").unwrap(), PathBuf::from("c:\\x\\y.rs"));
+    }
+
+    #[test]
+    fn bundled_servers_sort_newest_first() {
+        assert!(version_key("rust-lang.rust-analyzer-0.3.3081-win32-x64") > version_key("rust-lang.rust-analyzer-0.3.2999-win32-x64"));
+        assert!(!server_candidates().is_empty());
     }
 
     #[test]
