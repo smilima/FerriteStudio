@@ -1,0 +1,281 @@
+// The v1 code editor: a multi-line TextInput in a fixed-width font, with a
+// gutter for line numbers and breakpoints, error squiggles, the execution
+// line, and popups for completion and hover. Column positions come from the
+// font's character width, which is why the font must be monospaced.
+
+import { Palette } from "std-widgets.slint";
+import { CompletionRow, Mark } from "types.slint";
+
+export component CodeEditor inherits Rectangle {
+    in property <string> font-family;
+    in property <length> font-size: 13px;
+    in-out property <string> text;
+    in property <string> line-numbers: "1";
+    in property <int> line-count: 1;
+    in property <[int]> breakpoints;
+    in property <int> exec-line: -1;
+    in property <[Mark]> marks;
+    in property <bool> read-only;
+    in property <[CompletionRow]> completions;
+    in property <bool> completion-open;
+    in-out property <int> completion-index;
+    in property <string> hover-text;
+
+    out property <int> caret-line;
+    out property <int> caret-col;
+    out property <length> char-w: probe.preferred-width / 10;
+    out property <length> line-h: max(1px, probe2.preferred-height - probe.preferred-height);
+
+    callback edited(string);
+    callback caret-moved(int, int, int);
+    callback key(KeyEvent) -> bool;
+    callback toggle-breakpoint(int);
+    callback completion-chosen(int);
+    callback completion-cancel();
+
+    property <length> gutter-w: max(48px, self.char-w * 5 + 28px);
+    property <length> pad: 4px;
+    property <int> first-completion: max(0, min(self.completion-index - 4, self.completions.length - 10));
+    property <color> exec-color: #ffe9a6;
+
+    background: Palette.background;
+
+    // Places the caret at a byte offset, focuses the editor and scrolls the
+    // given line into view.
+    public function goto(offset: int, line: int) {
+        ti.set-selection-offsets(offset, offset);
+        ti.focus();
+        root.scroll-to-line(line);
+    }
+
+    public function scroll-to-line(line: int) {
+        if line * root.line-h + root.pad < -flick.content-y || (line + 2) * root.line-h + root.pad > -flick.content-y + flick.height {
+            flick.content-y = min(0px, -(line * root.line-h - flick.height / 3));
+        }
+    }
+
+    public function focus-editor() {
+        ti.focus();
+    }
+
+    probe := Text {
+        text: "MMMMMMMMMM";
+        font-family: root.font-family;
+        font-size: root.font-size;
+        visible: false;
+    }
+
+    probe2 := Text {
+        text: "M\nM";
+        font-family: root.font-family;
+        font-size: root.font-size;
+        visible: false;
+    }
+
+    flick := Flickable {
+        content-width: max(self.width, root.gutter-w + ti.preferred-width + 48px);
+        content-height: max(self.height, (root.line-count + 2) * root.line-h + 2 * root.pad);
+
+        // Current line.
+        Rectangle {
+            x: 0;
+            y: root.caret-line * root.line-h + root.pad;
+            height: root.line-h;
+            width: flick.content-width;
+            background: Palette.foreground.with-alpha(0.05);
+        }
+
+        if root.exec-line >= 0: Rectangle {
+            x: 0;
+            y: root.exec-line * root.line-h + root.pad;
+            height: root.line-h;
+            width: flick.content-width;
+            background: root.exec-color;
+        }
+
+        // Gutter: line numbers, breakpoints, execution point.
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: root.gutter-w;
+            height: flick.content-height;
+            background: Palette.alternate-background;
+
+            Text {
+                x: 0;
+                y: root.pad;
+                width: root.gutter-w - 24px;
+                text: root.line-numbers;
+                horizontal-alignment: right;
+                font-family: root.font-family;
+                font-size: root.font-size;
+                color: Palette.foreground.with-alpha(0.5);
+            }
+
+            for bp in root.breakpoints: Rectangle {
+                x: root.gutter-w - 18px;
+                y: bp * root.line-h + root.pad + (root.line-h - 12px) / 2;
+                width: 12px;
+                height: 12px;
+                border-radius: 6px;
+                background: #d32f2f;
+            }
+
+            if root.exec-line >= 0: Rectangle {
+                x: root.gutter-w - 16px;
+                y: root.exec-line * root.line-h + root.pad + (root.line-h - 8px) / 2;
+                width: 8px;
+                height: 8px;
+                background: #e69500;
+                border-width: 1px;
+                border-color: #8a5a00;
+            }
+
+            TouchArea {
+                clicked => {
+                    root.toggle-breakpoint(floor((self.mouse-y - root.pad) / root.line-h));
+                }
+            }
+        }
+
+        // Error and warning squiggles.
+        for m in root.marks: Rectangle {
+            x: root.gutter-w + 6px + m.col * root.char-w;
+            y: (m.line + 1) * root.line-h + root.pad - 2px;
+            width: max(root.char-w, m.len * root.char-w);
+            height: 2px;
+            background: m.level == "error" ? #e53935 : #e0a000;
+        }
+
+        ti := TextInput {
+            x: root.gutter-w + 6px;
+            y: root.pad;
+            width: max(flick.width - root.gutter-w - 6px, self.preferred-width + 24px);
+            height: max(flick.height - root.pad, self.preferred-height + 24px);
+            single-line: false;
+            wrap: no-wrap;
+            font-family: root.font-family;
+            font-size: root.font-size;
+            color: Palette.foreground;
+            selection-background-color: #3b82f660;
+            selection-foreground-color: Palette.foreground;
+            read-only: root.read-only;
+            text <=> root.text;
+
+            edited => {
+                root.edited(self.text);
+            }
+
+            cursor-position-changed(p) => {
+                root.caret-line = round(p.y / root.line-h);
+                root.caret-col = round(p.x / root.char-w);
+                root.caret-moved(root.caret-line, root.caret-col, self.cursor-position-byte-offset);
+                // Keep the caret visible.
+                if p.y + root.line-h + 2 * root.pad > -flick.content-y + flick.height {
+                    flick.content-y = -(p.y + root.line-h + 2 * root.pad - flick.height);
+                }
+                if p.y < -flick.content-y {
+                    flick.content-y = -p.y;
+                }
+                if self.x + p.x + 24px > -flick.content-x + flick.width {
+                    flick.content-x = -(self.x + p.x + 24px - flick.width);
+                }
+                if self.x + p.x < -flick.content-x + root.gutter-w + 6px {
+                    flick.content-x = min(0px, -(p.x - 24px));
+                }
+            }
+
+            key-pressed(e) => {
+                if root.completion-open {
+                    if e.text == Key.UpArrow {
+                        root.completion-index = max(0, root.completion-index - 1);
+                        return accept;
+                    }
+                    if e.text == Key.DownArrow {
+                        root.completion-index = min(root.completions.length - 1, root.completion-index + 1);
+                        return accept;
+                    }
+                    if e.text == Key.Return || e.text == Key.Tab {
+                        root.completion-chosen(root.completion-index);
+                        return accept;
+                    }
+                    if e.text == Key.Escape {
+                        root.completion-cancel();
+                        return accept;
+                    }
+                }
+                if root.key(e) {
+                    return accept;
+                }
+                reject
+            }
+        }
+
+        // Completion list under the caret.
+        if root.completion-open: Rectangle {
+            x: ti.x + root.caret-col * root.char-w;
+            y: (root.caret-line + 1) * root.line-h + root.pad + 2px;
+            width: 420px;
+            height: min(10, root.completions.length) * 22px + 4px;
+            background: Palette.control-background;
+            border-width: 1px;
+            border-color: Palette.border;
+            drop-shadow-blur: 6px;
+            drop-shadow-color: #00000040;
+            for item[i] in root.completions: Rectangle {
+                visible: i >= root.first-completion && i < root.first-completion + 10;
+                x: 2px;
+                y: 2px + (i - root.first-completion) * 22px;
+                width: parent.width - 4px;
+                height: 22px;
+                background: i == root.completion-index ? Palette.selection-background : transparent;
+                HorizontalLayout {
+                    padding-left: 6px;
+                    padding-right: 6px;
+                    spacing: 12px;
+                    Text {
+                        text: item.label;
+                        vertical-alignment: center;
+                        font-family: root.font-family;
+                        color: i == root.completion-index ? Palette.selection-foreground : Palette.foreground;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: item.detail;
+                        vertical-alignment: center;
+                        horizontal-alignment: right;
+                        color: i == root.completion-index ? Palette.selection-foreground : Palette.foreground.with-alpha(0.6);
+                        overflow: elide;
+                    }
+                }
+                TouchArea {
+                    clicked => {
+                        root.completion-chosen(i);
+                    }
+                }
+            }
+        }
+
+        // Help Insight popup.
+        if root.hover-text != "": Rectangle {
+            x: ti.x + root.caret-col * root.char-w;
+            y: (root.caret-line + 1) * root.line-h + root.pad + 2px;
+            width: min(560px, hover.preferred-width + 20px);
+            height: hover.preferred-height + 16px;
+            background: #fffbe6;
+            border-width: 1px;
+            border-color: #c9b458;
+            drop-shadow-blur: 6px;
+            drop-shadow-color: #00000040;
+            hover := Text {
+                x: 10px;
+                y: 8px;
+                width: min(540px, self.preferred-width);
+                text: root.hover-text;
+                wrap: word-wrap;
+                font-family: root.font-family;
+                color: #1f2328;
+            }
+        }
+    }
+}

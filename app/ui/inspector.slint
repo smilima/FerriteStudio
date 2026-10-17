@@ -1,0 +1,112 @@
+// The Object Inspector: Properties and Events tabs for the selection.
+
+import { CheckBox, LineEdit, ListView, Palette, TabWidget } from "std-widgets.slint";
+import { EventRow, PropRow } from "types.slint";
+
+component PropertyLine inherits Rectangle {
+    in property <PropRow> item;
+    in property <bool> alternate;
+    callback edited(string, string);
+    height: 30px;
+    background: self.alternate ? Palette.alternate-background : transparent;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 4px;
+        spacing: 6px;
+        Text {
+            width: 42%;
+            text: root.item.name;
+            vertical-alignment: center;
+            overflow: elide;
+            color: root.item.readonly ? Palette.foreground.with-alpha(0.55) : Palette.foreground;
+        }
+        if root.item.type-name == "bool": CheckBox {
+            checked: root.item.flag;
+            toggled => {
+                root.edited(root.item.name, self.checked ? "true" : "false");
+            }
+        }
+        if root.item.type-name != "bool": edit := LineEdit {
+            text: root.item.value;
+            read-only: root.item.readonly;
+            accepted(t) => {
+                root.edited(root.item.name, t);
+            }
+            changed has-focus => {
+                if !self.has-focus && self.text != root.item.value {
+                    root.edited(root.item.name, self.text);
+                }
+            }
+        }
+    }
+}
+
+export component Inspector inherits Rectangle {
+    in property <string> heading;
+    in property <[PropRow]> props;
+    in property <[EventRow]> events;
+    callback prop-edited(string, string);
+    callback event-activated(string);
+
+    background: Palette.background;
+
+    VerticalLayout {
+        Rectangle {
+            height: 32px;
+            background: Palette.alternate-background;
+            Text {
+                x: 8px;
+                height: parent.height;
+                vertical-alignment: center;
+                text: root.heading == "" ? "Object Inspector" : root.heading;
+                font-weight: 600;
+                overflow: elide;
+                width: parent.width - 16px;
+            }
+        }
+        TabWidget {
+            Tab {
+                title: "Properties";
+                ListView {
+                    for row[i] in root.props: PropertyLine {
+                        item: row;
+                        alternate: mod(i, 2) == 1;
+                        edited(name, value) => {
+                            root.prop-edited(name, value);
+                        }
+                    }
+                }
+            }
+            Tab {
+                title: "Events";
+                ListView {
+                    for ev[i] in root.events: Rectangle {
+                        height: 44px;
+                        background: ta.has-hover ? Palette.selection-background.with-alpha(0.25) : (mod(i, 2) == 1 ? Palette.alternate-background : transparent);
+                        VerticalLayout {
+                            padding-left: 8px;
+                            padding-top: 4px;
+                            padding-bottom: 4px;
+                            Text {
+                                text: ev.name + ev.signature;
+                                font-weight: 600;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: ev.handler == "" ? "double-click to create a handler" : ev.handler;
+                                color: ev.handler == "" ? Palette.foreground.with-alpha(0.5) : #2f6fd6;
+                                overflow: elide;
+                            }
+                        }
+                        ta := TouchArea {
+                            double-clicked => {
+                                root.event-activated(ev.name);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

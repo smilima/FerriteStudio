@@ -1,0 +1,10 @@
+[package]
+name = "ferrite-rpc"
+description = "Content-Length framed JSON messaging over child-process pipes, shared by the LSP and DAP clients"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json = { workspace = true }

@@ -1,0 +1,12 @@
+[package]
+name = "ferrite-lsp"
+description = "rust-analyzer client for Ferrite Studio: diagnostics, completion, hover, go-to-definition, formatting"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+ferrite-rpc = { workspace = true }
+lsp-types = { workspace = true }
+serde_json = { workspace = true }

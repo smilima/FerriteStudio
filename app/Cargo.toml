@@ -1,0 +1,21 @@
+[package]
+name = "ferrite-studio"
+description = "Ferrite Studio: a RAD IDE for Rust and Slint, in the spirit of C++Builder"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+default-run = "ferrite-studio"
+
+[dependencies]
+ferrite-form = { workspace = true }
+ferrite-build = { workspace = true }
+ferrite-lsp = { workspace = true }
+ferrite-dap = { workspace = true }
+slint = { workspace = true }
+rfd = { workspace = true }
+dirs = { workspace = true }
+serde_json = { workspace = true }
+
+[build-dependencies]
+slint-build = { workspace = true }

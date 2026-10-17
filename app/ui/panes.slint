@@ -1,0 +1,219 @@
+// Bottom panes: Messages, Problems, Call Stack, Local Variables, Watches.
+
+import { Button, LineEdit, ListView, Palette, TabWidget } from "std-widgets.slint";
+import { MessageRow, ProblemRow, StackRow, VarRow, WatchRow } from "types.slint";
+
+component Row inherits Rectangle {
+    in property <int> index;
+    in property <bool> highlight;
+    callback activated();
+    height: 22px;
+    background: self.highlight ? #ffe9a6 : (ta.has-hover ? Palette.selection-background.with-alpha(0.2) : (mod(self.index, 2) == 1 ? Palette.alternate-background : transparent));
+    ta := TouchArea {
+        double-clicked => {
+            root.activated();
+        }
+    }
+}
+
+export component BottomPanes inherits Rectangle {
+    in property <string> mono-font;
+    in property <[MessageRow]> messages;
+    in property <[ProblemRow]> problems;
+    in property <[StackRow]> stack;
+    in property <[VarRow]> locals;
+    in property <[WatchRow]> watches;
+    in-out property <int> current-tab;
+
+    callback problem-activated(int);
+    callback stack-activated(int);
+    callback local-activated(int);
+    callback add-watch(string);
+    callback remove-watch(int);
+
+    background: Palette.background;
+
+    public function scroll-messages-to-end() {
+        messages-list.content-y = min(0px, messages-list.visible-height - messages-list.content-height);
+    }
+
+    TabWidget {
+        current-index <=> root.current-tab;
+        Tab {
+            title: "Messages";
+            messages-list := ListView {
+                for m[i] in root.messages: Rectangle {
+                    height: 18px;
+                    Text {
+                        x: 6px;
+                        height: parent.height;
+                        vertical-alignment: center;
+                        text: m.text;
+                        font-family: root.mono-font;
+                        font-size: 12px;
+                        color: m.kind == "error" ? #d32f2f : m.kind == "warning" ? #b26a00 : m.kind == "info" ? #2f6fd6 : Palette.foreground;
+                    }
+                }
+            }
+        }
+        Tab {
+            title: root.problems.length == 0 ? "Problems" : "Problems (" + root.problems.length + ")";
+            ListView {
+                for p[i] in root.problems: Row {
+                    index: i;
+                    activated => {
+                        root.problem-activated(i);
+                    }
+                    HorizontalLayout {
+                        padding-left: 6px;
+                        spacing: 10px;
+                        Rectangle {
+                            width: 8px;
+                            Rectangle {
+                                width: 8px;
+                                height: 8px;
+                                border-radius: 4px;
+                                background: p.level == "error" ? #d32f2f : #e0a000;
+                            }
+                        }
+                        Text {
+                            width: 200px;
+                            text: p.location;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            color: #2f6fd6;
+                        }
+                        Text {
+                            text: p.message;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        Text {
+                            width: 90px;
+                            text: p.source;
+                            vertical-alignment: center;
+                            color: Palette.foreground.with-alpha(0.5);
+                        }
+                    }
+                }
+            }
+        }
+        Tab {
+            title: "Call Stack";
+            ListView {
+                for f[i] in root.stack: Row {
+                    index: i;
+                    highlight: f.current;
+                    activated => {
+                        root.stack-activated(i);
+                    }
+                    HorizontalLayout {
+                        padding-left: 6px;
+                        spacing: 16px;
+                        Text {
+                            text: f.name;
+                            vertical-alignment: center;
+                            font-family: root.mono-font;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: f.location;
+                            vertical-alignment: center;
+                            horizontal-alignment: right;
+                            color: Palette.foreground.with-alpha(0.6);
+                            overflow: elide;
+                        }
+                    }
+                }
+            }
+        }
+        Tab {
+            title: "Local Variables";
+            ListView {
+                for v[i] in root.locals: Row {
+                    index: i;
+                    activated => {
+                        root.local-activated(i);
+                    }
+                    HorizontalLayout {
+                        padding-left: 6px + v.depth * 16px;
+                        spacing: 8px;
+                        Text {
+                            width: 14px;
+                            text: v.expandable ? "+" : "";
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            width: 180px;
+                            text: v.name;
+                            vertical-alignment: center;
+                            font-family: root.mono-font;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: v.value;
+                            vertical-alignment: center;
+                            font-family: root.mono-font;
+                            overflow: elide;
+                        }
+                        Text {
+                            width: 220px;
+                            text: v.type-name;
+                            vertical-alignment: center;
+                            color: Palette.foreground.with-alpha(0.55);
+                            overflow: elide;
+                        }
+                    }
+                }
+            }
+        }
+        Tab {
+            title: "Watches";
+            VerticalLayout {
+                HorizontalLayout {
+                    padding: 4px;
+                    spacing: 6px;
+                    watch-edit := LineEdit {
+                        placeholder-text: "Expression to watch (Ctrl+F5 adds the word at the caret)";
+                        accepted(t) => {
+                            root.add-watch(t);
+                            self.text = "";
+                        }
+                    }
+                    Button {
+                        text: "Add";
+                        clicked => {
+                            root.add-watch(watch-edit.text);
+                            watch-edit.text = "";
+                        }
+                    }
+                }
+                ListView {
+                    for w[i] in root.watches: Row {
+                        index: i;
+                        activated => {
+                            root.remove-watch(i);
+                        }
+                        HorizontalLayout {
+                            padding-left: 6px;
+                            spacing: 16px;
+                            Text {
+                                width: 220px;
+                                text: w.expression;
+                                vertical-alignment: center;
+                                font-family: root.mono-font;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: w.value;
+                                vertical-alignment: center;
+                                font-family: root.mono-font;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

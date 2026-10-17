@@ -1,0 +1,495 @@
+// Ferrite Studio main window, laid out like RAD Studio: palette and project
+// on the left, Design/Code in the middle, Object Inspector on the right,
+// Messages and debug panes at the bottom.
+
+import { Button, LineEdit, ListView, Palette, ScrollView } from "std-widgets.slint";
+import {
+    CompletionRow, ControlItem, EventRow, FileItem, Mark, MessageRow, PaletteItem, ProblemRow, PropRow,
+    StackRow, TabItem, VarRow, WatchRow,
+} from "types.slint";
+import { Designer } from "designer.slint";
+import { Inspector } from "inspector.slint";
+import { CodeEditor } from "editor.slint";
+import { BottomPanes } from "panes.slint";
+
+export {
+    CompletionRow, ControlItem, EventRow, FileItem, Mark, MessageRow, PaletteItem, ProblemRow, PropRow,
+    StackRow, TabItem, VarRow, WatchRow,
+}
+
+component ToolButton inherits Rectangle {
+    in property <string> text;
+    in property <string> shortcut;
+    in property <bool> enabled: true;
+    in property <color> tint: Palette.foreground;
+    callback clicked();
+    width: label.preferred-width + 20px;
+    height: 30px;
+    border-radius: 4px;
+    background: !self.enabled ? transparent : ta.pressed ? Palette.selection-background.with-alpha(0.35) : ta.has-hover ? Palette.selection-background.with-alpha(0.18) : transparent;
+    label := Text {
+        text: root.text;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+        color: root.enabled ? root.tint : Palette.foreground.with-alpha(0.35);
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+component Separator inherits Rectangle {
+    width: 9px;
+    Rectangle {
+        x: 4px;
+        width: 1px;
+        height: 20px;
+        background: Palette.border;
+    }
+}
+
+component PanelTitle inherits Rectangle {
+    in property <string> text;
+    height: 26px;
+    background: Palette.alternate-background;
+    Text {
+        x: 8px;
+        height: parent.height;
+        vertical-alignment: center;
+        text: root.text;
+        font-weight: 600;
+    }
+}
+
+export component AppWindow inherits Window {
+    title: root.project-name == "" ? "Ferrite Studio" : root.project-name + " - Ferrite Studio";
+    preferred-width: 1360px;
+    preferred-height: 860px;
+    min-width: 960px;
+    min-height: 620px;
+
+    // ---- State provided by Rust ----
+    in property <string> project-name;
+    in property <string> view: "welcome"; // welcome | design | code
+    in property <[FileItem]> files;
+    in property <[PaletteItem]> palette;
+    in-out property <string> active-tool;
+    in property <bool> has-form;
+
+    in property <[ControlItem]> controls;
+    in property <int> selected: -1;
+    in property <string> form-title;
+    in property <int> form-width: 480;
+    in property <int> form-height: 320;
+
+    in property <string> inspector-heading;
+    in property <[PropRow]> props;
+    in property <[EventRow]> events;
+
+    in property <[TabItem]> tabs;
+    in-out property <string> editor-text;
+    in property <string> line-numbers;
+    in property <int> line-count: 1;
+    in property <string> mono-font: "DejaVu Sans Mono";
+    in property <[int]> breakpoints;
+    in property <int> exec-line: -1;
+    in property <[Mark]> marks;
+    in property <bool> editor-read-only;
+    in property <[CompletionRow]> completions;
+    in property <bool> completion-open;
+    in-out property <int> completion-index;
+    in property <string> hover-text;
+
+    in property <[MessageRow]> messages;
+    in property <[ProblemRow]> problems;
+    in property <[StackRow]> stack;
+    in property <[VarRow]> locals;
+    in property <[WatchRow]> watches;
+    in-out property <int> bottom-tab;
+
+    in property <string> status;
+    in property <string> lsp-status;
+    in property <string> debug-state; // "", "running", "stopped"
+    in property <bool> busy;
+    in property <string> caret-text;
+
+    in-out property <string> new-name: "my_app";
+    in-out property <string> new-location;
+    in-out property <string> open-path;
+
+    // ---- Requests to Rust ----
+    callback show-welcome();
+    callback new-project(string, string);
+    callback browse-new-location();
+    callback open-project(string);
+    callback browse-open();
+    callback save-all();
+    callback build();
+    callback run();
+    callback run-without-debugging();
+    callback program-reset();
+    callback step-over();
+    callback step-into();
+    callback step-out();
+    callback toggle-breakpoint-at-caret();
+    callback toggle-breakpoint(int);
+    callback toggle-design-code();
+    callback open-file(string);
+    callback activate-tab(int);
+    callback close-tab(int);
+    callback palette-pick(string);
+    callback palette-add(string);
+
+    callback select(int);
+    callback drop-control(int, int);
+    callback drag-control(int, int, int);
+    callback resize-control(int, int, int);
+    callback resize-form(int, int);
+    callback control-double-clicked(int);
+    callback delete-selected();
+    callback nudge(int, int);
+    callback prop-edited(string, string);
+    callback event-activated(string);
+
+    callback editor-edited(string);
+    callback caret-moved(int, int, int);
+    callback request-completion();
+    callback completion-chosen(int);
+    callback completion-cancel();
+    callback hover-at-caret();
+    callback goto-definition();
+    callback format-document();
+    callback add-watch-at-caret();
+    callback editor-special-key(string);
+
+    callback problem-activated(int);
+    callback stack-activated(int);
+    callback local-activated(int);
+    callback add-watch(string);
+    callback remove-watch(int);
+
+    public function goto-offset(offset: int, line: int) {
+        editor.goto(offset, line);
+    }
+
+    public function scroll-to-line(line: int) {
+        editor.scroll-to-line(line);
+    }
+
+    public function scroll-messages-to-end() {
+        panes.scroll-messages-to-end();
+    }
+
+    public function focus-designer() {
+        designer.focus-canvas();
+    }
+
+    // RAD Studio key bindings. Returns true when the key was handled.
+    function handle-key(e: KeyEvent) -> bool {
+        let ctrl = e.modifiers.control;
+        let shift = e.modifiers.shift;
+        let alt = e.modifiers.alt;
+        if e.text == Key.F9 && ctrl && shift { root.run-without-debugging(); return true; }
+        if e.text == Key.F9 && ctrl { root.build(); return true; }
+        if e.text == Key.F9 { root.run(); return true; }
+        if e.text == Key.F2 && ctrl { root.program-reset(); return true; }
+        if e.text == Key.F8 && shift { root.step-out(); return true; }
+        if e.text == Key.F8 { root.step-over(); return true; }
+        if e.text == Key.F7 && ctrl { root.add-watch-at-caret(); return true; }
+        if e.text == Key.F7 { root.step-into(); return true; }
+        if e.text == Key.F5 && ctrl { root.add-watch-at-caret(); return true; }
+        if e.text == Key.F5 { root.toggle-breakpoint-at-caret(); return true; }
+        if e.text == Key.F12 { root.toggle-design-code(); return true; }
+        if e.text == Key.UpArrow && alt { root.goto-definition(); return true; }
+        if ctrl && (e.text == "s" || e.text == "S") { root.save-all(); return true; }
+        if ctrl && (e.text == "d" || e.text == "D") && root.view == "code" { root.format-document(); return true; }
+        if ctrl && shift && (e.text == "h" || e.text == "H") && root.view == "code" { root.hover-at-caret(); return true; }
+        if ctrl && e.text == " " && root.view == "code" { root.request-completion(); return true; }
+        false
+    }
+
+    function editor-key(e: KeyEvent) -> bool {
+        if root.handle-key(e) { return true; }
+        if e.text == Key.Escape && root.hover-text != "" { root.editor-special-key("escape"); return true; }
+        if root.editor-read-only { return false; }
+        if e.text == Key.Tab && !e.modifiers.shift && !e.modifiers.control { root.editor-special-key("tab"); return true; }
+        if e.text == Key.Return && !e.modifiers.control && !e.modifiers.alt { root.editor-special-key("return"); return true; }
+        false
+    }
+
+    FocusScope {
+        key-pressed(e) => {
+            if root.handle-key(e) { return accept; }
+            reject
+        }
+
+        VerticalLayout {
+            // ---- Toolbar ----
+            Rectangle {
+                height: 38px;
+                background: Palette.alternate-background;
+                HorizontalLayout {
+                    padding: 4px;
+                    spacing: 2px;
+                    alignment: start;
+                    ToolButton { text: "New"; clicked => { root.show-welcome(); } }
+                    ToolButton { text: "Open"; clicked => { root.browse-open(); } }
+                    ToolButton { text: "Save All"; enabled: root.project-name != ""; clicked => { root.save-all(); } }
+                    Separator { }
+                    ToolButton { text: "Build  Ctrl+F9"; enabled: root.project-name != "" && !root.busy; clicked => { root.build(); } }
+                    ToolButton { text: root.debug-state == "stopped" ? "Continue  F9" : "Run  F9"; tint: #1f8a3b; enabled: root.project-name != "" && !root.busy && root.debug-state != "running"; clicked => { root.run(); } }
+                    ToolButton { text: "Run without debugging"; enabled: root.project-name != "" && !root.busy && root.debug-state == ""; clicked => { root.run-without-debugging(); } }
+                    ToolButton { text: "Reset  Ctrl+F2"; tint: #c62828; enabled: root.busy || root.debug-state != ""; clicked => { root.program-reset(); } }
+                    Separator { }
+                    ToolButton { text: "Step Over  F8"; enabled: root.debug-state == "stopped"; clicked => { root.step-over(); } }
+                    ToolButton { text: "Trace Into  F7"; enabled: root.debug-state == "stopped"; clicked => { root.step-into(); } }
+                    ToolButton { text: "Run Until Return"; enabled: root.debug-state == "stopped"; clicked => { root.step-out(); } }
+                    ToolButton { text: "Breakpoint  F5"; enabled: root.view == "code"; clicked => { root.toggle-breakpoint-at-caret(); } }
+                    Separator { }
+                    ToolButton { text: root.view == "design" ? "Code  F12" : "Design  F12"; enabled: root.has-form; clicked => { root.toggle-design-code(); } }
+                }
+            }
+
+            HorizontalLayout {
+                // ---- Left: Project Manager and Tool Palette ----
+                VerticalLayout {
+                    width: 230px;
+                    PanelTitle { text: "Project"; }
+                    ListView {
+                        vertical-stretch: 1;
+                        for f in root.files: Rectangle {
+                            height: 22px;
+                            background: f.active ? Palette.selection-background.with-alpha(0.35) : fta.has-hover ? Palette.selection-background.with-alpha(0.15) : transparent;
+                            Text {
+                                x: 8px;
+                                height: parent.height;
+                                width: parent.width - 12px;
+                                vertical-alignment: center;
+                                text: f.label;
+                                font-weight: f.is-form ? 600 : 400;
+                                overflow: elide;
+                            }
+                            fta := TouchArea {
+                                double-clicked => {
+                                    root.open-file(f.path);
+                                }
+                            }
+                        }
+                    }
+                    PanelTitle { text: root.active-tool == "" ? "Tool Palette" : "Tool Palette: click the form to drop"; }
+                    ListView {
+                        vertical-stretch: 1;
+                        for p in root.palette: Rectangle {
+                            height: 36px;
+                            background: root.active-tool == p.kind ? Palette.selection-background.with-alpha(0.45) : pta.has-hover ? Palette.selection-background.with-alpha(0.15) : transparent;
+                            VerticalLayout {
+                                padding-left: 8px;
+                                padding-top: 2px;
+                                padding-bottom: 2px;
+                                Text { text: p.kind == "Text" ? "Label (Text)" : p.kind == "Rectangle" ? "Panel (Rectangle)" : p.kind; font-weight: 600; }
+                                Text { text: p.hint; font-size: 11px; color: Palette.foreground.with-alpha(0.6); }
+                            }
+                            pta := TouchArea {
+                                enabled: root.has-form;
+                                clicked => {
+                                    root.palette-pick(p.kind);
+                                }
+                                double-clicked => {
+                                    root.palette-add(p.kind);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { width: 1px; background: Palette.border; }
+
+                // ---- Centre: Design / Code ----
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    Rectangle {
+                        height: 30px;
+                        background: Palette.alternate-background;
+                        HorizontalLayout {
+                            alignment: start;
+                            for t[i] in root.tabs: Rectangle {
+                                width: tlabel.preferred-width + (t.closable ? 44px : 24px);
+                                background: t.active && root.view == "code" ? Palette.background : transparent;
+                                tlabel := Text {
+                                    x: 10px;
+                                    height: parent.height;
+                                    vertical-alignment: center;
+                                    text: (t.dirty ? "*" : "") + t.label;
+                                    font-weight: t.active ? 600 : 400;
+                                }
+                                tta := TouchArea {
+                                    clicked => {
+                                        root.activate-tab(i);
+                                    }
+                                }
+                                if t.closable: Rectangle {
+                                    x: parent.width - 24px;
+                                    width: 18px;
+                                    height: 18px;
+                                    y: 6px;
+                                    border-radius: 3px;
+                                    background: cta.has-hover ? Palette.selection-background.with-alpha(0.3) : transparent;
+                                    Text { text: "x"; horizontal-alignment: center; vertical-alignment: center; color: Palette.foreground.with-alpha(0.6); }
+                                    cta := TouchArea {
+                                        clicked => {
+                                            root.close-tab(i);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        vertical-stretch: 1;
+                        designer := Designer {
+                            visible: root.view == "design";
+                            width: parent.width;
+                            height: parent.height;
+                            controls: root.controls;
+                            selected: root.selected;
+                            form-title: root.form-title;
+                            form-width: root.form-width;
+                            form-height: root.form-height;
+                            active-tool: root.active-tool;
+                            select(i) => { root.select(i); }
+                            drop-control(x, y) => { root.drop-control(x, y); }
+                            drag-control(i, dx, dy) => { root.drag-control(i, dx, dy); }
+                            resize-control(i, dw, dh) => { root.resize-control(i, dw, dh); }
+                            resize-form(dw, dh) => { root.resize-form(dw, dh); }
+                            control-double-clicked(i) => { root.control-double-clicked(i); }
+                            delete-selected => { root.delete-selected(); }
+                            nudge(dx, dy) => { root.nudge(dx, dy); }
+                            key(e) => { root.handle-key(e) }
+                        }
+                        editor := CodeEditor {
+                            visible: root.view == "code";
+                            width: parent.width;
+                            height: parent.height;
+                            font-family: root.mono-font;
+                            text <=> root.editor-text;
+                            line-numbers: root.line-numbers;
+                            line-count: root.line-count;
+                            breakpoints: root.breakpoints;
+                            exec-line: root.exec-line;
+                            marks: root.marks;
+                            read-only: root.editor-read-only;
+                            completions: root.completions;
+                            completion-open: root.completion-open;
+                            completion-index <=> root.completion-index;
+                            hover-text: root.hover-text;
+                            edited(t) => { root.editor-edited(t); }
+                            caret-moved(l, c, o) => { root.caret-moved(l, c, o); }
+                            key(e) => { root.editor-key(e) }
+                            toggle-breakpoint(l) => { root.toggle-breakpoint(l); }
+                            completion-chosen(i) => { root.completion-chosen(i); }
+                            completion-cancel => { root.completion-cancel(); }
+                        }
+                        if root.view == "welcome": Rectangle {
+                            background: Palette.alternate-background;
+                            VerticalLayout {
+                                alignment: center;
+                                HorizontalLayout {
+                                    alignment: center;
+                                    Rectangle {
+                                        width: 560px;
+                                        height: welcome.preferred-height;
+                                        background: Palette.background;
+                                        border-radius: 8px;
+                                        border-width: 1px;
+                                        border-color: Palette.border;
+                                        welcome := VerticalLayout {
+                                            padding: 24px;
+                                            spacing: 10px;
+                                            Text { text: "Ferrite Studio"; font-size: 26px; font-weight: 700; }
+                                            Text { text: "Design Slint forms, write Rust handlers, build and debug in one place."; color: Palette.foreground.with-alpha(0.7); wrap: word-wrap; }
+                                            Rectangle { height: 8px; }
+                                            Text { text: "New Slint Application"; font-weight: 600; font-size: 15px; }
+                                            HorizontalLayout {
+                                                spacing: 8px;
+                                                Text { text: "Name"; width: 70px; vertical-alignment: center; }
+                                                LineEdit { text <=> root.new-name; }
+                                            }
+                                            HorizontalLayout {
+                                                spacing: 8px;
+                                                Text { text: "Location"; width: 70px; vertical-alignment: center; }
+                                                LineEdit { text <=> root.new-location; }
+                                                Button { text: "Browse..."; clicked => { root.browse-new-location(); } }
+                                            }
+                                            HorizontalLayout {
+                                                alignment: end;
+                                                Button { text: "Create"; primary: true; clicked => { root.new-project(root.new-name, root.new-location); } }
+                                            }
+                                            Rectangle { height: 1px; background: Palette.border; }
+                                            Text { text: "Open Project"; font-weight: 600; font-size: 15px; }
+                                            HorizontalLayout {
+                                                spacing: 8px;
+                                                LineEdit { text <=> root.open-path; placeholder-text: "Folder containing Cargo.toml"; }
+                                                Button { text: "Browse..."; clicked => { root.browse-open(); } }
+                                                Button { text: "Open"; clicked => { root.open-project(root.open-path); } }
+                                            }
+                                            if root.status != "": Text { text: root.status; color: #c62828; wrap: word-wrap; }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { width: 1px; background: Palette.border; }
+
+                // ---- Right: Object Inspector ----
+                Inspector {
+                    width: 300px;
+                    heading: root.inspector-heading;
+                    props: root.props;
+                    events: root.events;
+                    prop-edited(n, v) => { root.prop-edited(n, v); }
+                    event-activated(n) => { root.event-activated(n); }
+                }
+            }
+
+            Rectangle { height: 1px; background: Palette.border; }
+
+            panes := BottomPanes {
+                height: 210px;
+                mono-font: root.mono-font;
+                messages: root.messages;
+                problems: root.problems;
+                stack: root.stack;
+                locals: root.locals;
+                watches: root.watches;
+                current-tab <=> root.bottom-tab;
+                problem-activated(i) => { root.problem-activated(i); }
+                stack-activated(i) => { root.stack-activated(i); }
+                local-activated(i) => { root.local-activated(i); }
+                add-watch(t) => { root.add-watch(t); }
+                remove-watch(i) => { root.remove-watch(i); }
+            }
+
+            // ---- Status bar ----
+            Rectangle {
+                height: 24px;
+                background: root.debug-state == "stopped" ? #b26a00 : root.debug-state == "running" ? #1f6f3b : #2f3b4a;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 18px;
+                    Text { text: root.caret-text; color: white; vertical-alignment: center; width: 130px; }
+                    Text { text: root.status; color: white; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                    Text { text: root.debug-state == "" ? "" : "Debugger: " + root.debug-state; color: white; vertical-alignment: center; }
+                    Text { text: root.lsp-status; color: #d6e2f0; vertical-alignment: center; }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,117 @@
+// Data shared between the IDE's Rust code and its Slint UI.
+
+// One control on the designer canvas, with every property any palette
+// kind might need. Rust fills in the fields that apply to `kind`.
+export struct ControlItem {
+    name: string,
+    kind: string,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    text: string,
+    placeholder: string,
+    checked: bool,
+    enabled: bool,
+    primary: bool,
+    checkable: bool,
+    read-only: bool,
+    fvalue: float,
+    fmin: float,
+    fmax: float,
+    ivalue: int,
+    imin: int,
+    imax: int,
+    items: [string],
+    current-index: int,
+    progress: float,
+    indeterminate: bool,
+    background: color,
+    has-background: bool,
+    fg: color,
+    has-fg: bool,
+    font-size: length,
+    font-weight: int,
+    border-radius: length,
+    border-width: length,
+    border-color: color,
+}
+
+export struct PaletteItem {
+    kind: string,
+    hint: string,
+}
+
+// A row of the Object Inspector's Properties tab.
+export struct PropRow {
+    name: string,
+    type-name: string,
+    value: string,
+    flag: bool,
+    readonly: bool,
+}
+
+// A row of the Object Inspector's Events tab.
+export struct EventRow {
+    name: string,
+    signature: string,
+    handler: string,
+}
+
+export struct FileItem {
+    label: string,
+    path: string,
+    is-form: bool,
+    active: bool,
+}
+
+export struct TabItem {
+    label: string,
+    dirty: bool,
+    active: bool,
+    closable: bool,
+}
+
+export struct MessageRow {
+    text: string,
+    kind: string,
+}
+
+export struct ProblemRow {
+    level: string,
+    source: string,
+    message: string,
+    location: string,
+}
+
+export struct StackRow {
+    name: string,
+    location: string,
+    current: bool,
+}
+
+export struct VarRow {
+    name: string,
+    value: string,
+    type-name: string,
+    depth: int,
+    expandable: bool,
+}
+
+export struct WatchRow {
+    expression: string,
+    value: string,
+}
+
+export struct CompletionRow {
+    label: string,
+    detail: string,
+}
+
+// A squiggle under part of a line in the code editor.
+export struct Mark {
+    line: int,
+    col: int,
+    len: int,
+    level: string,
+}

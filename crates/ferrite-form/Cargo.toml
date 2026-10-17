@@ -1,0 +1,13 @@
+[package]
+name = "ferrite-form"
+description = "Form model, component catalog, .slint reader/writer and Rust code generation for Ferrite Studio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+slint-interpreter = { workspace = true }
+spin_on = "0.1"
