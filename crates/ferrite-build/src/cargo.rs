@@ -110,12 +110,54 @@ fn wait_loop(child: Arc<Mutex<Child>>) -> Option<i32> {
     }
 }
 
+/// The GNU target matching a Windows MSVC host (`x86_64-pc-windows-msvc`
+/// -> `x86_64-pc-windows-gnu`); GDB needs its DWARF debug info.
+pub fn gnu_target_for(host: &str) -> Option<String> {
+    host.strip_suffix("-pc-windows-msvc").map(|arch| format!("{arch}-pc-windows-gnu"))
+}
+
+/// Whether the active toolchain has the standard library for `target`.
+pub fn target_installed(target: &str) -> bool {
+    let mut cmd = Command::new("rustc");
+    cmd.args(["--print", "sysroot"]);
+    no_console(&mut cmd);
+    cmd.output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()))
+        .is_some_and(|sysroot| sysroot.join("lib").join("rustlib").join(target).join("lib").is_dir())
+}
+
+/// Options for [`build`].
+#[derive(Clone, Debug, Default)]
+pub struct BuildOptions {
+    /// `--target` triple, or the host's default.
+    pub target: Option<String>,
+    /// Folders put in front of PATH (a C compiler for the target, say).
+    pub path_prepend: Vec<PathBuf>,
+}
+
 /// `cargo build` in `root`. Events arrive on worker threads; the last one
 /// is always [`CargoEvent::Finished`].
-pub fn build(root: &Path, on_event: impl Fn(CargoEvent) + Send + Sync + 'static) -> std::io::Result<Job> {
+pub fn build(
+    root: &Path,
+    options: &BuildOptions,
+    on_event: impl Fn(CargoEvent) + Send + Sync + 'static,
+) -> std::io::Result<Job> {
     let mut cmd = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
-    cmd.args(["build", "--message-format=json", "--color", "never"])
-        .current_dir(root)
+    cmd.args(["build", "--message-format=json", "--color", "never"]);
+    if let Some(t) = &options.target {
+        cmd.args(["--target", t]);
+    }
+    if !options.path_prepend.is_empty() {
+        let current = std::env::var_os("PATH").unwrap_or_default();
+        let mut dirs = options.path_prepend.clone();
+        dirs.extend(std::env::split_paths(&current));
+        if let Ok(path) = std::env::join_paths(dirs) {
+            cmd.env("PATH", path);
+        }
+    }
+    cmd.current_dir(root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -191,6 +233,13 @@ mod tests {
         assert_eq!(p.path.as_deref(), Some(Path::new("/p/src/main.rs")));
         assert_eq!((p.line, p.column), (2, 13));
         assert!(matches!(&ev[0], CargoEvent::Line(l) if l.starts_with("error[E0425]")));
+    }
+
+    #[test]
+    fn gnu_targets_match_msvc_hosts() {
+        assert_eq!(gnu_target_for("x86_64-pc-windows-msvc").as_deref(), Some("x86_64-pc-windows-gnu"));
+        assert_eq!(gnu_target_for("aarch64-pc-windows-msvc").as_deref(), Some("aarch64-pc-windows-gnu"));
+        assert_eq!(gnu_target_for("x86_64-unknown-linux-gnu"), None);
     }
 
     #[test]

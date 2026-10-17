@@ -5,6 +5,7 @@
 //! toolchains and LLVM's `lldb-dap` for the Windows MSVC toolchain and macOS.
 
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -66,21 +67,41 @@ pub struct AdapterConfig {
     pub kind: AdapterKind,
     pub program: PathBuf,
     pub args: Vec<String>,
+    /// Folders put in front of PATH for the adapter (and so the debuggee),
+    /// such as MSYS2's `ucrt64\bin`, which holds a MinGW GDB's DLLs.
+    pub path_prepend: Vec<PathBuf>,
+}
+
+fn exe_name(name: &str) -> String {
+    if cfg!(windows) { format!("{name}.exe") } else { name.to_string() }
 }
 
 fn find_on_path(name: &str) -> Option<PathBuf> {
-    let exe = if cfg!(windows) { format!("{name}.exe") } else { name.to_string() };
+    let exe = exe_name(name);
     std::env::var_os("PATH").and_then(|paths| {
         std::env::split_paths(&paths).map(|d| d.join(&exe)).find(|p| p.is_file())
     })
 }
 
-fn command_output(program: &Path, args: &[&str]) -> Option<String> {
+/// The current PATH with `dirs` in front.
+pub fn path_with(dirs: &[PathBuf]) -> OsString {
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let mut all: Vec<PathBuf> = dirs.to_vec();
+    all.extend(std::env::split_paths(&current));
+    std::env::join_paths(all).unwrap_or(current)
+}
+
+fn command_output(program: &Path, args: &[&str], path_prepend: &[PathBuf]) -> Option<(bool, String)> {
     let mut cmd = Command::new(program);
     cmd.args(args);
+    if !path_prepend.is_empty() {
+        cmd.env("PATH", path_with(path_prepend));
+    }
     no_console(&mut cmd);
     let out = cmd.output().ok()?;
-    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&out.stderr));
+    Some((out.status.success(), text))
 }
 
 /// Major version from `gdb --version`, e.g. 15 for "GNU gdb (...) 15.1".
@@ -92,28 +113,170 @@ pub fn gdb_major_version(version_output: &str) -> Option<u32> {
 
 /// Rust's host triple from `rustc -vV`.
 pub fn rust_host() -> Option<String> {
-    let out = command_output(Path::new("rustc"), &["-vV"])?;
+    let (ok, out) = command_output(Path::new("rustc"), &["-vV"], &[])?;
+    if !ok {
+        return None;
+    }
     out.lines().find_map(|l| l.strip_prefix("host: ")).map(str::to_string)
+}
+
+/// Why a GDB cannot serve as Ferrite Studio's debug adapter, if it cannot.
+/// DAP mode needs GDB 14 or later with working embedded Python.
+pub fn gdb_problem(gdb: &Path, path_prepend: &[PathBuf]) -> Option<String> {
+    let Some((ok, version)) = command_output(gdb, &["--version"], path_prepend) else {
+        return Some("it does not start".into());
+    };
+    if !ok {
+        return Some("it does not start (missing DLLs?)".into());
+    }
+    match gdb_major_version(&version) {
+        Some(v) if v >= 14 => {}
+        Some(v) => return Some(format!("it is version {v}; DAP mode needs 14 or later")),
+        None => return Some("its version is unknown".into()),
+    }
+    let probe = command_output(gdb, &["-nx", "-q", "-batch", "-ex", "python import gdb.dap"], path_prepend);
+    match probe {
+        Some((true, out)) if !out.contains("Error") && !out.contains("Traceback") => None,
+        Some((_, out)) => Some(format!(
+            "its Python cannot load the DAP module: {}",
+            out.lines().find(|l| !l.trim().is_empty()).unwrap_or("unknown error").trim()
+        )),
+        None => Some("it does not start".into()),
+    }
+}
+
+/// MSYS2 installations to search on Windows.
+fn msys2_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(r) = std::env::var_os("MSYS2_ROOT") {
+        roots.push(PathBuf::from(r));
+    }
+    for r in [r"C:\msys64", r"C:\tools\msys64"] {
+        roots.push(PathBuf::from(r));
+    }
+    roots.retain(|r| r.is_dir());
+    roots.dedup();
+    roots
+}
+
+const MSYS2_ENVS: &[&str] = &["ucrt64", "mingw64", "clang64"];
+
+/// Version numbers in a folder name such as `gdb-18.1`, for sorting.
+fn version_key(name: &str) -> Vec<u32> {
+    name.split(|c: char| !c.is_ascii_digit()).filter_map(|p| p.parse().ok()).collect()
+}
+
+/// GDB candidates with the folders each needs on PATH, best first: GDB on
+/// PATH, then MSYS2 builds under `opt` (newest first), then MSYS2 packages.
+fn gdb_candidates() -> Vec<(PathBuf, Vec<Vec<PathBuf>>)> {
+    let mut out: Vec<(PathBuf, Vec<Vec<PathBuf>>)> = Vec::new();
+    if let Some(p) = find_on_path("gdb") {
+        out.push((p, vec![vec![]]));
+    }
+    if cfg!(windows) {
+        for root in msys2_roots() {
+            let env_bins: Vec<PathBuf> =
+                MSYS2_ENVS.iter().map(|e| root.join(e).join("bin")).filter(|b| b.is_dir()).collect();
+            let mut opt: Vec<PathBuf> = std::fs::read_dir(root.join("opt"))
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| e.path())
+                .filter(|d| {
+                    d.file_name().is_some_and(|n| n.to_string_lossy().starts_with("gdb"))
+                        && d.join("bin").join(exe_name("gdb")).is_file()
+                })
+                .collect();
+            opt.sort_by_key(|d| std::cmp::Reverse(version_key(&d.file_name().unwrap().to_string_lossy())));
+            for d in opt {
+                // A self-built GDB needs the DLLs of the environment it was built in.
+                let tries = env_bins.iter().map(|b| vec![b.clone()]).collect();
+                out.push((d.join("bin").join(exe_name("gdb")), tries));
+            }
+            for bin in &env_bins {
+                let gdb = bin.join(exe_name("gdb"));
+                if gdb.is_file() {
+                    out.push((gdb, vec![vec![bin.clone()]]));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// MSYS2 environment `bin` folders that might hold the DLLs of `program`.
+fn env_bins_for(program: &Path) -> Vec<Vec<PathBuf>> {
+    let mut tries = vec![vec![]];
+    for root in msys2_roots() {
+        if program.starts_with(&root) {
+            if let Some(bin) = program.parent() {
+                if MSYS2_ENVS.iter().any(|e| bin.ends_with(Path::new(e).join("bin"))) {
+                    tries.push(vec![bin.to_path_buf()]);
+                }
+            }
+            tries.extend(MSYS2_ENVS.iter().map(|e| vec![root.join(e).join("bin")]));
+        }
+    }
+    tries
+}
+
+/// Splits `FERRITE_DAP` into a program and arguments; the program may be quoted.
+fn split_command_line(cmdline: &str) -> Option<(PathBuf, Vec<String>)> {
+    let s = cmdline.trim();
+    let (program, rest) = if let Some(q) = s.strip_prefix('"') {
+        let end = q.find('"')?;
+        (q[..end].to_string(), &q[end + 1..])
+    } else {
+        let end = s.find(char::is_whitespace).unwrap_or(s.len());
+        (s[..end].to_string(), &s[end..])
+    };
+    (!program.is_empty()).then(|| (PathBuf::from(program), rest.split_whitespace().map(str::to_string).collect()))
+}
+
+fn gdb_args() -> Vec<String> {
+    let mut args = vec!["-i=dap".to_string(), "-q".to_string()];
+    // Load the Rust pretty-printers shipped with the toolchain, as rust-gdb does.
+    if let Some((true, sysroot)) = command_output(Path::new("rustc"), &["--print", "sysroot"], &[]) {
+        let etc = Path::new(sysroot.trim()).join("lib").join("rustlib").join("etc");
+        if etc.is_dir() {
+            args.push(format!("--directory={}", etc.display()));
+            args.push("-iex".into());
+            args.push(format!("add-auto-load-safe-path {}", etc.display()));
+        }
+    }
+    args
 }
 
 impl AdapterConfig {
     /// `FERRITE_DAP` (a full command line) wins; otherwise choose by toolchain.
+    /// On the Windows MSVC toolchain LLVM's lldb-dap is preferred because it
+    /// reads PDB; otherwise GDB is used, including MSYS2 installs not on PATH.
     pub fn detect() -> Result<AdapterConfig, String> {
-        if let Ok(cmdline) = std::env::var("FERRITE_DAP") {
-            let mut parts = cmdline.split_whitespace();
-            if let Some(program) = parts.next() {
-                let program = PathBuf::from(program);
-                let name = program.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
-                let kind = if name.starts_with("gdb") {
-                    AdapterKind::Gdb
-                } else if name.contains("lldb") {
-                    AdapterKind::LldbDap
-                } else {
-                    AdapterKind::Custom
-                };
-                return Ok(AdapterConfig { kind, program, args: parts.map(str::to_string).collect() });
+        if let Some((program, args)) = std::env::var("FERRITE_DAP").ok().as_deref().and_then(split_command_line) {
+            let name = program.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
+            let kind = if name.starts_with("gdb") {
+                AdapterKind::Gdb
+            } else if name.contains("lldb") {
+                AdapterKind::LldbDap
+            } else {
+                AdapterKind::Custom
+            };
+            let mut path_prepend = Vec::new();
+            if kind == AdapterKind::Gdb {
+                let tries = env_bins_for(&program);
+                let found = tries.iter().find(|dirs| gdb_problem(&program, dirs).is_none());
+                match found {
+                    Some(dirs) => path_prepend = dirs.clone(),
+                    None => {
+                        let why = gdb_problem(&program, tries.last().map_or(&[][..], |d| d.as_slice()))
+                            .unwrap_or_default();
+                        return Err(format!("FERRITE_DAP names {}, but {why}", program.display()));
+                    }
+                }
             }
+            return Ok(AdapterConfig { kind, program, args, path_prepend });
         }
+
         let host = rust_host().unwrap_or_default();
         let prefer_lldb = host.contains("windows-msvc") || host.contains("apple");
         let lldb = || {
@@ -122,36 +285,50 @@ impl AdapterConfig {
                 (cfg!(windows) && llvm.is_file()).then_some(llvm)
             })
         };
-        let gdb = || {
-            let path = find_on_path("gdb")?;
-            let v = command_output(&path, &["--version"])?;
-            (gdb_major_version(&v)? >= 14).then_some(path)
-        };
         if prefer_lldb {
             if let Some(p) = lldb() {
-                return Ok(AdapterConfig { kind: AdapterKind::LldbDap, program: p, args: vec![] });
+                return Ok(AdapterConfig { kind: AdapterKind::LldbDap, program: p, args: vec![], path_prepend: vec![] });
             }
         }
-        if let Some(p) = gdb() {
-            let mut args = vec!["-i=dap".to_string(), "-q".to_string()];
-            // Load the Rust pretty-printers shipped with the toolchain, as rust-gdb does.
-            if let Some(sysroot) = command_output(Path::new("rustc"), &["--print", "sysroot"]) {
-                let etc = Path::new(sysroot.trim()).join("lib").join("rustlib").join("etc");
-                if etc.is_dir() {
-                    args.push(format!("--directory={}", etc.display()));
-                    args.push("-iex".into());
-                    args.push(format!("add-auto-load-safe-path {}", etc.display()));
+        let mut rejected = Vec::new();
+        for (gdb, tries) in gdb_candidates() {
+            match tries.iter().find(|dirs| gdb_problem(&gdb, dirs).is_none()) {
+                Some(dirs) => {
+                    return Ok(AdapterConfig { kind: AdapterKind::Gdb, program: gdb, args: gdb_args(), path_prepend: dirs.clone() });
+                }
+                None => {
+                    let why = gdb_problem(&gdb, tries.first().map_or(&[][..], |d| d.as_slice())).unwrap_or_default();
+                    rejected.push(format!("{} ({why})", gdb.display()));
                 }
             }
-            return Ok(AdapterConfig { kind: AdapterKind::Gdb, program: p, args });
         }
         if let Some(p) = lldb() {
-            return Ok(AdapterConfig { kind: AdapterKind::LldbDap, program: p, args: vec![] });
+            return Ok(AdapterConfig { kind: AdapterKind::LldbDap, program: p, args: vec![], path_prepend: vec![] });
         }
-        Err(format!(
-            "No debug adapter found for {host}. Install GDB 14+ (GNU toolchain) or LLVM's lldb-dap, \
-             or set FERRITE_DAP to an adapter command line."
-        ))
+        let mut msg = format!(
+            "No debug adapter found for {host}. Install GDB 14+ with Python (for example MSYS2's, under C:\\msys64) \
+             or LLVM's lldb-dap, or set FERRITE_DAP to an adapter command line."
+        );
+        if !rejected.is_empty() {
+            msg.push_str(&format!(" Rejected: {}.", rejected.join("; ")));
+        }
+        Err(msg)
+    }
+
+    /// GDB reads DWARF only, so on the Windows MSVC toolchain programs must be
+    /// built for the matching GNU target to be debuggable.
+    pub fn needs_dwarf(&self) -> bool {
+        self.kind == AdapterKind::Gdb
+    }
+
+    /// The command that starts the adapter, with its PATH additions.
+    pub fn command(&self) -> Command {
+        let mut cmd = Command::new(&self.program);
+        cmd.args(&self.args);
+        if !self.path_prepend.is_empty() {
+            cmd.env("PATH", path_with(&self.path_prepend));
+        }
+        cmd
     }
 
     pub fn describe(&self) -> String {
@@ -196,8 +373,8 @@ impl DapClient {
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
         let endpoint_cell: Arc<OnceLock<Weak<Endpoint>>> = Arc::new(OnceLock::new());
         let on_event = Arc::new(on_event);
-        let mut cmd = Command::new(&config.program);
-        cmd.args(&config.args).current_dir(cwd);
+        let mut cmd = config.command();
+        cmd.current_dir(cwd);
 
         let (p, cell, ev) = (pending.clone(), endpoint_cell.clone(), on_event.clone());
         let ev_err = on_event.clone();
@@ -476,11 +653,22 @@ mod tests {
     }
 
     #[test]
+    fn command_lines_and_versions_parse() {
+        let (p, a) = split_command_line(r#""C:\Program Files\x\gdb.exe" -i=dap -q"#).unwrap();
+        assert_eq!(p, PathBuf::from(r"C:\Program Files\x\gdb.exe"));
+        assert_eq!(a, ["-i=dap", "-q"]);
+        let (p, a) = split_command_line("gdb -i=dap").unwrap();
+        assert_eq!((p, a), (PathBuf::from("gdb"), vec!["-i=dap".to_string()]));
+        assert!(version_key("gdb-18.1") > version_key("gdb-17.2"));
+        assert!(version_key("gdb-18.10") > version_key("gdb-18.9"));
+    }
+
+    #[test]
     fn launch_arguments_follow_each_dialect() {
-        let gdb = AdapterConfig { kind: AdapterKind::Gdb, program: "gdb".into(), args: vec![] };
+        let gdb = AdapterConfig { kind: AdapterKind::Gdb, program: "gdb".into(), args: vec![], path_prepend: vec![] };
         let v = gdb.launch_arguments(Path::new("/p/app"), Path::new("/p"), &[]);
         assert_eq!(v["stopAtBeginningOfMainSubprogram"], false);
-        let lldb = AdapterConfig { kind: AdapterKind::LldbDap, program: "lldb-dap".into(), args: vec![] };
+        let lldb = AdapterConfig { kind: AdapterKind::LldbDap, program: "lldb-dap".into(), args: vec![], path_prepend: vec![] };
         assert_eq!(lldb.launch_arguments(Path::new("/p/app"), Path::new("/p"), &[])["stopOnEntry"], false);
     }
 }

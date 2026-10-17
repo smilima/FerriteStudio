@@ -8,5 +8,5 @@
 pub mod cargo;
 pub mod project;
 
-pub use cargo::{CargoEvent, Job, Problem};
+pub use cargo::{BuildOptions, CargoEvent, Job, Problem};
 pub use project::{FormEntry, FormOutputs, Manifest, Project};

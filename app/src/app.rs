@@ -117,6 +117,8 @@ pub struct App {
     pub after_build: AfterBuild,
     pub exe: Option<PathBuf>,
     pub debug: Option<DebugSession>,
+    /// Debug adapter found on first use.
+    pub adapter: Option<ferrite_dap::AdapterConfig>,
     pub watches: Vec<(String, String)>,
     pub completions: Vec<Completion>,
     pub shown_completions: Vec<usize>,
@@ -184,6 +186,7 @@ pub fn install(ui: &AppWindow) {
         after_build: AfterBuild::Nothing,
         exe: None,
         debug: None,
+        adapter: None,
         watches: Vec::new(),
         completions: Vec::new(),
         shown_completions: Vec::new(),

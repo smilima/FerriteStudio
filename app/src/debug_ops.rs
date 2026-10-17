@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use ferrite_dap::{AdapterConfig, DapClient, DapEvent, Scope, StackFrame, Variable};
+use ferrite_dap::{DapClient, DapEvent, Scope, StackFrame, Variable};
 use ferrite_lsp::path_key;
 use slint::{ModelRc, VecModel};
 
@@ -55,7 +55,7 @@ impl App {
             self.message("The build produced no executable to debug", "error");
             return;
         };
-        let config = match AdapterConfig::detect() {
+        let config = match self.debug_adapter() {
             Ok(c) => c,
             Err(e) => {
                 self.message(e, "warning");

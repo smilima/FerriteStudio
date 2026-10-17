@@ -1,10 +1,50 @@
 //! Build, Run and Program Reset.
 
-use ferrite_build::cargo::{self, CargoEvent};
+use ferrite_build::cargo::{self, BuildOptions, CargoEvent};
+use ferrite_dap::AdapterConfig;
 
 use crate::app::{post, AfterBuild, App};
 
 impl App {
+    /// The debug adapter, detected once per session.
+    pub fn debug_adapter(&mut self) -> Result<AdapterConfig, String> {
+        if let Some(cfg) = &self.adapter {
+            return Ok(cfg.clone());
+        }
+        self.status("Looking for a debugger...");
+        let cfg = AdapterConfig::detect()?;
+        let dlls = if cfg.path_prepend.is_empty() {
+            String::new()
+        } else {
+            let dirs: Vec<String> = cfg.path_prepend.iter().map(|d| d.display().to_string()).collect();
+            format!(" (DLLs from {})", dirs.join(", "))
+        };
+        self.message(format!("Debugger: {}{dlls}", cfg.program.display()), "info");
+        self.adapter = Some(cfg.clone());
+        Ok(cfg)
+    }
+
+    /// Build options for a debug session: GDB reads DWARF only, so on the
+    /// Windows MSVC toolchain the program is built for the GNU target.
+    fn debug_build_options(&mut self, cfg: &AdapterConfig) -> Result<BuildOptions, String> {
+        let mut options = BuildOptions::default();
+        if !cfg.needs_dwarf() {
+            return Ok(options);
+        }
+        let host = ferrite_dap::rust_host().unwrap_or_default();
+        if let Some(target) = cargo::gnu_target_for(&host) {
+            if !cargo::target_installed(&target) {
+                return Err(format!(
+                    "GDB cannot read the debug info (PDB) of the {host} toolchain. \
+                     Install the GNU target once with: rustup target add {target}"
+                ));
+            }
+            self.message(format!("Building for {target} so GDB can read the debug info"), "info");
+            options.target = Some(target);
+        }
+        Ok(options)
+    }
+
     /// Ctrl+F9. Saves everything first, as RAD Studio does before compiling.
     pub fn build(&mut self, after: AfterBuild) {
         let Some(root) = self.root().map(|r| r.to_path_buf()) else { return };
@@ -15,8 +55,28 @@ impl App {
         if self.run_job.is_some() || self.debug.is_some() {
             self.program_reset();
         }
-        self.save_all();
         self.messages.set_vec(Vec::new());
+        let mut after = after;
+        let mut options = BuildOptions::default();
+        if after == AfterBuild::Debug {
+            match self.debug_adapter() {
+                Ok(cfg) => match self.debug_build_options(&cfg) {
+                    Ok(o) => options = o,
+                    Err(e) => {
+                        self.message(&e, "error");
+                        self.status("Cannot debug: see Messages");
+                        self.ui().set_bottom_tab(0);
+                        return;
+                    }
+                },
+                Err(e) => {
+                    self.message(&e, "warning");
+                    self.message("Running without the debugger", "info");
+                    after = AfterBuild::Run;
+                }
+            }
+        }
+        self.save_all();
         self.build_problems.clear();
         self.refresh_problems();
         self.exe = None;
@@ -24,8 +84,9 @@ impl App {
         self.ui().set_busy(true);
         self.ui().set_bottom_tab(0);
         self.status("Building...");
-        self.message(format!("cargo build ({})", root.display()), "info");
-        match cargo::build(&root, |ev| post(move |a| a.on_cargo(ev))) {
+        let target = options.target.as_deref().map(|t| format!(" --target {t}")).unwrap_or_default();
+        self.message(format!("cargo build{target} ({})", root.display()), "info");
+        match cargo::build(&root, &options, |ev| post(move |a| a.on_cargo(ev))) {
             Ok(job) => self.build_job = Some(job),
             Err(e) => {
                 self.ui().set_busy(false);

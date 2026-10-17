@@ -11,8 +11,10 @@ use ferrite_dap::{AdapterConfig, DapClient, DapEvent};
 const T: Duration = Duration::from_secs(30);
 
 fn wait_for(rx: &mpsc::Receiver<DapEvent>, mut pred: impl FnMut(&DapEvent) -> bool, out: &mut String) -> DapEvent {
+    let mut seen = Vec::new();
     loop {
-        let ev = rx.recv_timeout(T).expect("adapter event timed out");
+        let ev = rx.recv_timeout(T).unwrap_or_else(|_| panic!("timed out; events so far: {seen:?}"));
+        seen.push(format!("{ev:?}").chars().take(120).collect::<String>());
         if let DapEvent::Output { text, .. } = &ev {
             out.push_str(text);
         }
@@ -37,7 +39,22 @@ fn breakpoint_stack_locals_and_exit() {
     )
     .unwrap();
     let exe = dir.join(if cfg!(windows) { "hello.exe" } else { "hello" });
-    let status = Command::new("rustc").args(["-g", "-o"]).arg(&exe).arg(&src).status().unwrap();
+    let mut rustc = Command::new("rustc");
+    rustc.args(["-g", "-o"]).arg(&exe).arg(&src);
+    // GDB reads DWARF only: on the Windows MSVC toolchain build for the GNU target.
+    let host = ferrite_dap::rust_host().unwrap_or_default();
+    if config.needs_dwarf() && host.ends_with("-pc-windows-msvc") {
+        let target = host.replace("-pc-windows-msvc", "-pc-windows-gnu");
+        let sysroot = Command::new("rustc").args(["--print", "sysroot"]).output().unwrap();
+        let sysroot = PathBuf::from(String::from_utf8_lossy(&sysroot.stdout).trim());
+        if !sysroot.join("lib").join("rustlib").join(&target).join("lib").is_dir() {
+            eprintln!("GDB found but {target} is not installed; skipping");
+            return;
+        }
+        rustc.args(["--target", &target]);
+    }
+    eprintln!("debugging with {} {:?} (PATH additions {:?})", config.program.display(), config.args, config.path_prepend);
+    let status = rustc.status().unwrap();
     assert!(status.success());
 
     let (tx, rx) = mpsc::channel();
