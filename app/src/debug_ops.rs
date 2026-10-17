@@ -261,7 +261,10 @@ impl App {
         if d.id != id || d.frame_id() != Some(frame_id) {
             return;
         }
-        d.vars.extend(vars.into_iter().map(|var| VarEntry { var, depth: 0, expanded: false }));
+        // GDB on Windows also lists vtables such as
+        // `<my_app::Point as core::fmt::Debug>::{vtable}`: not variables.
+        let vars = vars.into_iter().filter(|v| !v.name.starts_with('<'));
+        d.vars.extend(vars.map(|var| VarEntry { var, depth: 0, expanded: false }));
         self.refresh_locals();
     }
 

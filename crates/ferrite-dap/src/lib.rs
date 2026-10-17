@@ -221,13 +221,21 @@ fn split_command_line(cmdline: &str) -> Option<(PathBuf, Vec<String>)> {
 
 fn gdb_args() -> Vec<String> {
     let mut args = vec!["-i=dap".to_string(), "-q".to_string()];
-    // Load the Rust pretty-printers shipped with the toolchain, as rust-gdb does.
+    // Load the Rust pretty-printers shipped with the toolchain, as rust-gdb
+    // does, so that a String reads "Ada" rather than its buffer. Programs
+    // built for Linux name the loader script in a .debug_gdb_scripts
+    // section; Windows builds do not, so it is also sourced here.
     if let Some((true, sysroot)) = command_output(Path::new("rustc"), &["--print", "sysroot"], &[]) {
         let etc = Path::new(sysroot.trim()).join("lib").join("rustlib").join("etc");
         if etc.is_dir() {
             args.push(format!("--directory={}", etc.display()));
             args.push("-iex".into());
             args.push(format!("add-auto-load-safe-path {}", etc.display()));
+            let loader = etc.join("gdb_load_rust_pretty_printers.py");
+            if loader.is_file() {
+                args.push("-iex".into());
+                args.push(format!("source {}", loader.display().to_string().replace('\\', "/")));
+            }
         }
     }
     args

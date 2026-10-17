@@ -35,7 +35,7 @@ fn breakpoint_stack_locals_and_exit() {
     let src = dir.join("hello.rs");
     std::fs::write(
         &src,
-        "fn add(a: i32, b: i32) -> i32 {\n    let sum = a + b;\n    sum\n}\n\nstruct Point {\n    x: i32,\n    y: i32,\n}\n\nfn main() {\n    let p = Point { x: 2, y: 3 };\n    let x = add(p.x, p.y);\n    println!(\"x = {x}\");\n}\n",
+        "fn add(a: i32, b: i32) -> i32 {\n    let sum = a + b;\n    sum\n}\n\nstruct Point {\n    x: i32,\n    y: i32,\n}\n\nfn main() {\n    let name = String::from(\"Ada\");\n    let p = Point { x: 2, y: 3 };\n    let x = add(p.x, p.y);\n    println!(\"x = {x}\");\n}\n",
     )
     .unwrap();
     let exe = dir.join(if cfg!(windows) { "hello.exe" } else { "hello" });
@@ -118,6 +118,11 @@ fn breakpoint_stack_locals_and_exit() {
     let (htx, hrx) = mpsc::channel();
     client.evaluate_value("p", Some(main_frame.id), "hover", move |r| htx.send(r).unwrap()).unwrap();
     let p = hrx.recv_timeout(T).unwrap().expect("p evaluates");
+    // The Rust pretty-printers are loaded: a String shows its text.
+    let (stx, srx) = mpsc::channel();
+    client.evaluate_value("name", Some(main_frame.id), "hover", move |r| stx.send(r).unwrap()).unwrap();
+    let name = srx.recv_timeout(T).unwrap().expect("name evaluates");
+    assert!(name.value.contains("Ada"), "pretty-printed String: {name:?}");
     eprintln!("hover p: {p:?}");
     assert!(p.reference != 0, "a struct has children: {p:?}");
     assert!(p.type_name.contains("Point") || p.value.contains("Point"), "{p:?}");
